@@ -1,0 +1,1 @@
+"""scGen baseline entry point."""

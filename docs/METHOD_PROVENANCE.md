@@ -8,11 +8,11 @@ byte-checked against the server source before the old root-level copies were
 removed. `method/` was therefore migrated, not rewritten.
 
 From that baseline through this document's revision, the only modified legacy
-method file is `method/inference.py` in commit `ff2a71a`:
+method file is `method/inference/pathway.py` in commit `ff2a71a`:
 
-* base model remains `/root/autodl-tmp/qwen3_8B`;
-* adapter remains `/root/autodl-tmp/qwen3_8b_FrameworkA_1/checkpoint_epoch_4`;
-* default input remains `/root/autodl-tmp/test_7_species_dataset.csv`;
+* base model is now referenced directly as `/root/autodl-tmp/models/qwen3_8B`;
+* adapter is now referenced directly as `/root/autodl-tmp/checkpoints/legacy/qwen3_8b_FrameworkA_1/checkpoint_epoch_4`;
+* default input is now referenced directly as `/root/autodl-tmp/data/test_7_species_dataset.csv`;
 * batch size, maximum input length, maximum new tokens, greedy decoding, and
   prompt template remain the legacy defaults;
 * output changed deliberately from the misleading, pre-existing legacy file
@@ -25,7 +25,7 @@ or data format.
 
 ## What the current inference run is
 
-`qwen3_8b_FrameworkA_1/checkpoint_epoch_4` contains both a LoRA adapter
+`checkpoints/legacy/qwen3_8b_FrameworkA_1/checkpoint_epoch_4` contains both a LoRA adapter
 (`adapter_model.safetensors`) and a separate `hnn_func.pt`. The inference
 script loads only the LoRA adapter. It does not load the HNN state, load the AE
 projector, perform ODE rollout, or inject a latent trajectory into decoding.
