@@ -10,6 +10,10 @@ keeps model generation separate from metric calculation.
 | IV CSP | `task4_csp.py` | inference CSV | reactant, reaction, exact-step, parse-validity scores |
 | V CKI | `task5_cki.py` | intervention records with calibrated WT/KO survival scores | CSR, GateAcc, JSD, SLM |
 | VI perturbed cell | `task6_perturbed_cell.py` | NPZ matrices, or C2S prediction JSONL plus its training JSONL | expression/delta Pearson and Spearman, Top-K DE delta correlation |
+| VII step shuffling | `task7_step_shuffling.py` | explicit gold step continuations, optional base model + adapter | original-order rank, MRR, shuffle rejection, score margin |
+| VIII directional reranking | `task8_directional_reranking.py` | expert-validated positive/direction-negative candidate sets | directionality accuracy, wrong-direction rejection, score gap |
+| IX counterfactual perturbation | `task9_counterfactual.py` | NPZ paired control/predicted/target trajectories | counterfactual PCTE, endpoint error, intervention-effect cosine |
+| X BioSafety-style analysis | `task10_biosafety.py` | declarative gold/predicted risk labels and evidence IDs | risk and evidence PRF1, severity error |
 
 Run the no-network synthetic verification from the repository root:
 
@@ -40,6 +44,12 @@ PCTE. CKI also needs a curated counterfactual/gate dataset plus a calibrated
 phenotype scorer, while Task VI needs a model-to-expression decoder in a shared
 gene space. The repository now contains their evaluators and explicit data
 contracts, but does not manufacture unavailable biological ground truth.
+
+Tasks VII–X have runnable code but must not be reported before the required
+corpora and labels in [DATA_REQUIREMENTS.md](DATA_REQUIREMENTS.md) are supplied.
+In particular, Task VIII requires expert-negative construction; Task IX needs
+an intervention-conditioned model; and the PDF does not define Task X's
+BioSafety taxonomy.
 
 The existing C2S artifacts can be evaluated without regenerating them. The
 vocabulary is built only from training text; it is never inferred from test
