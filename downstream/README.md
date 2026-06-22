@@ -9,7 +9,7 @@ keeps model generation separate from metric calculation.
 | III PCTE | `task3_pcte.py` | precomputed paired latents, or prediction CSV + base model + AE | DTW-aligned cosine/Euclidean PCTE |
 | IV CSP | `task4_csp.py` | inference CSV | reactant, reaction, exact-step, parse-validity scores |
 | V CKI | `task5_cki.py` | intervention records with calibrated WT/KO survival scores | CSR, GateAcc, JSD, SLM |
-| VI perturbed cell | `task6_perturbed_cell.py` | NPZ: `control`, `observed`, `predicted` `[cells, genes]` | expression/delta Pearson and Spearman, Top-K DE delta correlation |
+| VI perturbed cell | `task6_perturbed_cell.py` | NPZ matrices, or C2S prediction JSONL plus its training JSONL | expression/delta Pearson and Spearman, Top-K DE delta correlation |
 
 Run the no-network synthetic verification from the repository root:
 
@@ -40,3 +40,14 @@ PCTE. CKI also needs a curated counterfactual/gate dataset plus a calibrated
 phenotype scorer, while Task VI needs a model-to-expression decoder in a shared
 gene space. The repository now contains their evaluators and explicit data
 contracts, but does not manufacture unavailable biological ground truth.
+
+The existing C2S artifacts can be evaluated without regenerating them. The
+vocabulary is built only from training text; it is never inferred from test
+predictions.
+
+```bash
+python -m downstream.task6_perturbed_cell \
+  --c2s-predictions /root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_ours_results_epoch5.jsonl \
+  --c2s-train /root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl \
+  --output-dir /root/autodl-tmp/runs/downstream/task6/c2s_epoch5
+```
