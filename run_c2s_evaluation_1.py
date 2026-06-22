@@ -1,0 +1,153 @@
+import json
+import os
+import torch
+import numpy as np
+import scipy.stats as stats
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
+
+# ================= 1. Environment & Path Config =================
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+base_model_path = "/root/autodl-tmp/qwen3_8B" 
+lora_checkpoint_path = "/root/autodl-tmp/checkpoints/qwen3_8b_pathway_c2s_sft_small_5percent/checkpoint_epoch_5"
+train_jsonl_path = "/root/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl"
+test_jsonl_path = "/root/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
+predictions_output_path = "/root/CRISPR_GSE264667_Data/jurkat_ours_results_epoch5.jsonl"
+
+print(f"[*] Device: {device}")
+print(f"[*] Base Model: {base_model_path}")
+print(f"[*] LoRA Weights: {lora_checkpoint_path}")
+
+# ================= 2. Build Gene Reference Profile =================
+print("[*] Building global gene reference profile (HVGs)...")
+gene_counts = {}
+with open(train_jsonl_path, 'r', encoding='utf-8') as f:
+    for line in f:
+        if line.strip():
+            data = json.loads(line.strip())
+            for gene in data['output'].replace('.', '').split():
+                gene_counts[gene] = gene_counts.get(gene, 0) + 1
+            if "Control cell sentence: " in data['instruction']:
+                ctrl_part = data['instruction'].split("Control cell sentence: ")[1].split(".\n\nPerturbed")[0]
+                for gene in ctrl_part.split():
+                    gene_counts[gene] = gene_counts.get(gene, 0) + 1
+
+top_genes_sorted = [g for g, c in sorted(gene_counts.items(), key=lambda x: x[1], reverse=True)]
+hvg_5000 = top_genes_sorted[:5000]
+hvg_set = set(hvg_5000)
+
+# ================= 3. Load Qwen + LoRA Model =================
+print("[*] Loading base model and LoRA adapter...")
+tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_model = AutoModelForCausalLM.from_pretrained(
+    base_model_path,
+    torch_dtype=torch.bfloat16,
+    attn_implementation="sdpa",
+    trust_remote_code=True
+).to(device)
+
+model = PeftModel.from_pretrained(base_model, lora_checkpoint_path)
+model.eval()
+print("[+] Model loaded successfully. Ready for evaluation.")
+
+# ================= 4. C2S Text-to-Vector Utility =================
+def c2s_text_to_vector(text, hvg_list):
+    """Convert expression sequence text into a numerical profile vector based on ranks."""
+    vector = np.zeros(len(hvg_list))
+    clean_text = text.replace('<\ctrl100>', '').replace('.', '')
+    genes = clean_text.split()
+    max_rank = len(genes)
+    for rank, gene in enumerate(genes):
+        if gene in hvg_set:
+            idx = hvg_list.index(gene)
+            vector[idx] = max_rank - rank
+    return vector
+
+# ================= 5. Batch Inference =================
+print(f"[*] Starting inference. Saving outputs to: {predictions_output_path}")
+evaluated_records = []
+
+with open(test_jsonl_path, 'r', encoding='utf-8') as f:
+    test_lines = [line.strip() for line in f if line.strip()]
+
+# Fast validation mode (subsetting test set)
+test_lines = test_lines[:100] 
+print(f"[*] [Fast Validation] Subsampling first {len(test_lines)} records for evaluation...")
+
+with open(predictions_output_path, 'w', encoding='utf-8') as out_f:
+    for line in tqdm(test_lines, desc="Qwen-LoRA Generation"):
+        data = json.loads(line)
+        instruction = data['instruction']
+        gt_text = data['output']
+        
+        control_text = instruction.split("Control cell sentence: ")[1].split(".\n\nPerturbed")[0]
+        
+        # Format using Qwen's standard Chat template
+        prompt = f"<|im_start|user\n{instruction}<|im_end|>\n<|im_start|>assistant\n"
+        input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
+        
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids=input_ids,
+                max_new_tokens=1200,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id
+            )
+        
+        gen_text = tokenizer.decode(outputs[0][input_ids.shape[1]:], skip_special_tokens=True).strip()
+        
+        save_item = {"instruction": instruction, "ground_truth": gt_text, "prediction": gen_text, "control_base": control_text}
+        out_f.write(json.dumps(save_item, ensure_ascii=False) + "\n")
+        evaluated_records.append(save_item)
+
+# ================= 6. Metrics Calculation =================
+print("\n[*] Inference completed. Calculating evaluation benchmarks...")
+results_container = {k: [] for k in ["pearson", "spearman", "top20_de_pearson", "top20_de_spearman", "delta_pearson", "delta_spearman", "delta_top20_pearson", "delta_top20_spearman"]}
+
+for item in evaluated_records:
+    v_pred = c2s_text_to_vector(item['prediction'], hvg_5000)
+    v_gt = c2s_text_to_vector(item['ground_truth'], hvg_5000)
+    v_ctrl = c2s_text_to_vector(item['control_base'], hvg_5000)
+    
+    if np.std(v_pred) == 0 or np.std(v_gt) == 0 or np.std(v_ctrl) == 0: 
+        continue
+    
+    delta_gt, delta_pred = v_gt - v_ctrl, v_pred - v_ctrl
+    top20_indices = np.argsort(np.abs(delta_gt))[-20:]
+    
+    results_container["pearson"].append(stats.pearsonr(v_pred, v_gt)[0])
+    results_container["spearman"].append(stats.spearmanr(v_pred, v_gt)[0])
+    
+    if np.std(v_pred[top20_indices]) > 0 and np.std(v_gt[top20_indices]) > 0:
+        results_container["top20_de_pearson"].append(stats.pearsonr(v_pred[top20_indices], v_gt[top20_indices])[0])
+        results_container["top20_de_spearman"].append(stats.spearmanr(v_pred[top20_indices], v_gt[top20_indices])[0])
+        
+    if np.std(delta_pred) > 0 and np.std(delta_gt) > 0:
+        results_container["delta_pearson"].append(stats.pearsonr(delta_pred, delta_gt)[0])
+        results_container["delta_spearman"].append(stats.spearmanr(delta_pred, delta_gt)[0])
+        
+    if np.std(delta_pred[top20_indices]) > 0 and np.std(delta_gt[top20_indices]) > 0:
+        results_container["delta_top20_pearson"].append(stats.pearsonr(delta_pred[top20_indices], delta_gt[top20_indices])[0])
+        results_container["delta_top20_spearman"].append(stats.spearmanr(delta_pred[top20_indices], delta_gt[top20_indices])[0])
+
+# ================= 7. Final Report =================
+print("\n" + "="*75)
+print("="*75)
+print("-"*75)
+print(f" [Absolute Profile] Pearson R:             {np.mean(results_container['pearson']):.4f} ± {np.std(results_container['pearson']):.4f}")
+print(f" [Absolute Profile] Top-20 DE Pearson R:   {np.mean(results_container['top20_de_pearson']):.4f} ± {np.std(results_container['top20_de_pearson']):.4f}")
+print(f" [Absolute Profile] Spearman R:            {np.mean(results_container['spearman']):.4f} ± {np.std(results_container['spearman']):.4f}")
+print(f" [Absolute Profile] Top-20 DE Spearman R:  {np.mean(results_container['top20_de_spearman']):.4f} ± {np.std(results_container['top20_de_spearman']):.4f}")
+print("-"*75)
+print(f" [Delta Profile] Pearson R:               {np.mean(results_container['delta_pearson']):.4f} ± {np.std(results_container['delta_pearson']):.4f}")
+print(f" [Delta Profile] Top-20 DE Pearson R:     {np.mean(results_container['delta_top20_pearson']):.4f} ± {np.std(results_container['delta_top20_pearson']):.4f}")
+print(f" [Delta Profile] Spearman R:              {np.mean(results_container['delta_spearman']):.4f} ± {np.std(results_container['delta_spearman']):.4f}")
+print(f" [Delta Profile] Top-20 DE Spearman R:    {np.mean(results_container['delta_top20_spearman']):.4f} ± {np.std(results_container['delta_top20_spearman']):.4f}")
+print("="*75)
