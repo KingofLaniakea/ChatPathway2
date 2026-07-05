@@ -1,1 +1,1 @@
-"""One module per downstream hypothesis-testing task."""
+"""One package per downstream hypothesis-testing task."""

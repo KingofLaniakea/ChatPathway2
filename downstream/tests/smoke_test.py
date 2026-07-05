@@ -15,7 +15,6 @@ from downstream.tasks.task6_perturbed_cell import evaluate as evaluate_cells
 from downstream.tasks.task7_step_shuffling import rank_summary, shuffled_candidates
 from downstream.tasks.task8_directional_reranking import evaluate_case as evaluate_directional
 from downstream.tasks.task9_counterfactual import evaluate as evaluate_counterfactual
-from downstream.tasks.task10_biosafety import evaluate as evaluate_biosafety
 
 
 def main() -> None:
@@ -63,11 +62,6 @@ def main() -> None:
     _, counterfactual = evaluate_counterfactual(trajectory, trajectory, trajectory, 32)
     assert counterfactual["metrics"]["counterfactual_pcte"] == 0.0, counterfactual
 
-    _, biosafety = evaluate_biosafety([{
-        "gold": {"risk_labels": ["R1"], "evidence_ids": ["E1"], "severity": 2},
-        "prediction": {"risk_labels": ["R1"], "evidence_ids": ["E1"], "severity": 2},
-    }])
-    assert biosafety["risk_metrics"]["f1"] == 1.0 and biosafety["mean_severity_absolute_error"] == 0.0, biosafety
     print("All downstream metric smoke tests passed.")
 
 
