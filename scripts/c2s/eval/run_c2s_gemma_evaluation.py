@@ -75,7 +75,7 @@ def c2s_text_to_vector(text, hvg_list):
     """依照 C2S 论文 Rank 机制：靠前的词在文本中被视作高表达，赋予更高相对权重"""
     vector = np.zeros(len(hvg_list))
     # 彻底洗掉可能的标志符
-    clean_text = text.replace('<\ctrl100>', '').replace('.', '')
+    clean_text = text.replace('<\\ctrl100>', '').replace('.', '')
     genes = clean_text.split()
     max_rank = len(genes)
     for rank, gene in enumerate(genes):

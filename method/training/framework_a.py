@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 import torch
@@ -12,6 +13,61 @@ from peft import LoraConfig, get_peft_model, TaskType, PeftModel
 from tqdm import tqdm
 from torchdiffeq import odeint
 import numpy as np
+
+
+CONFIG_FIELDS = (
+    "base_model_id",
+    "sft_lora_path",
+    "ae_ckpt_path",
+    "data_path",
+    "save_path",
+    "batch_size",
+    "gradient_accumulation_steps",
+    "lr",
+    "hnn_lr",
+    "epochs",
+    "max_length",
+    "latent_dim",
+    "lambda_align",
+    "lambda_f",
+    "lambda_d",
+    "device",
+)
+
+
+def config_to_dict(cfg):
+    return {field: getattr(cfg, field) for field in CONFIG_FIELDS}
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train FrameworkA HNN-regularized LoRA.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--base-model", dest="base_model_id", default=ThirdStageConfig.base_model_id)
+    parser.add_argument("--sft-lora", dest="sft_lora_path", default=ThirdStageConfig.sft_lora_path)
+    parser.add_argument("--ae-ckpt", dest="ae_ckpt_path", default=ThirdStageConfig.ae_ckpt_path)
+    parser.add_argument("--train", dest="data_path", default=ThirdStageConfig.data_path)
+    parser.add_argument("--save-dir", dest="save_path", default=ThirdStageConfig.save_path)
+    parser.add_argument("--batch-size", type=int, default=ThirdStageConfig.batch_size)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=ThirdStageConfig.gradient_accumulation_steps)
+    parser.add_argument("--lr", type=float, default=ThirdStageConfig.lr)
+    parser.add_argument("--hnn-lr", type=float, default=ThirdStageConfig.hnn_lr)
+    parser.add_argument("--epochs", type=int, default=ThirdStageConfig.epochs)
+    parser.add_argument("--max-length", type=int, default=ThirdStageConfig.max_length)
+    parser.add_argument("--latent-dim", type=int, default=ThirdStageConfig.latent_dim)
+    parser.add_argument("--lambda-align", type=float, default=ThirdStageConfig.lambda_align)
+    parser.add_argument("--lambda-f", type=float, default=ThirdStageConfig.lambda_f)
+    parser.add_argument("--lambda-d", type=float, default=ThirdStageConfig.lambda_d)
+    parser.add_argument("--device", default=ThirdStageConfig.device)
+    args = parser.parse_args()
+    cfg = ThirdStageConfig()
+    for key, value in vars(args).items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+def time_column(t, x):
+    if torch.is_tensor(t):
+        return t.to(device=x.device, dtype=x.dtype).reshape(1, 1).expand(x.size(0), 1)
+    return torch.full((x.size(0), 1), float(t), device=x.device, dtype=x.dtype)
 
 class ThirdStageConfig:
     base_model_id = "/root/autodl-tmp/models/qwen3_8B"
@@ -70,7 +126,7 @@ class TDHNNFunc(nn.Module):
             dH = torch.autograd.grad(H.sum(), x, create_graph=True)[0]
             derivs = dH @ self.M.t()
             qdot, pdot = derivs[:, :self.half_dim], derivs[:, self.half_dim:]
-            t_tensor = torch.full((x.size(0), 1), t, device=x.device, dtype=x.dtype)
+            t_tensor = time_column(t, x)
             F = self.f_net(t_tensor)
             return torch.cat([qdot, pdot - torch.abs(self.d1) * pdot + F], dim=1)
 
@@ -119,10 +175,13 @@ def collate_fn(batch):
     labels = torch.nn.utils.rnn.pad_sequence([b['labels'] for b in batch], batch_first=True, padding_value=-100)
     return {"input_ids": input_ids, "labels": labels, "attention_mask": (input_ids != pad_id).long()}
 
-def train_third_stage():
-    cfg = ThirdStageConfig()
+def train_third_stage(cfg=None):
+    cfg = cfg or parse_args()
     device = cfg.device
     os.makedirs(cfg.save_path, exist_ok=True)
+    with open(os.path.join(cfg.save_path, "run_config.json"), "w", encoding="utf-8") as f:
+        json.dump(config_to_dict(cfg), f, indent=2, ensure_ascii=False)
+        f.write("\n")
     
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_id, trust_remote_code=True)
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
@@ -144,7 +203,7 @@ def train_third_stage():
     model.enable_input_require_grads()
 
     print(f"Loading pre-trained AE projector from {cfg.ae_ckpt_path}...")
-    proj = CascadeProjection(high_dim=base_model.config.hidden_size, latent_dim=cfg.latent_dim).to(device).bfloat16()
+    proj = CascadeProjection(high_dim=base_model.config.hidden_size, latent_dim=cfg.latent_dim).to(device).float()
     sd = torch.load(cfg.ae_ckpt_path, map_location=device)
     proj.load_state_dict({(k[7:] if k.startswith('module.') else k): v for k, v in sd.items()})
     for p in proj.parameters(): p.requires_grad = False
@@ -157,7 +216,7 @@ def train_third_stage():
     #     print(f"Loading resumed HNN parameters from {hnn_f_path}...")
     #     hnn_f.load_state_dict(torch.load(hnn_f_path, map_location=device))
 
-    hnn_f = TDHNNFunc(cfg.latent_dim).to(device).bfloat16()
+    hnn_f = TDHNNFunc(cfg.latent_dim).to(device).float()
 
     optimizer = optim.AdamW([{'params': model.parameters(), 'lr': cfg.lr}, {'params': hnn_f.parameters(), 'lr': cfg.hnn_lr}])
     
@@ -185,58 +244,59 @@ def train_third_stage():
             outputs = model(input_ids=inputs, attention_mask=mask, labels=labels, output_hidden_states=True)
             loss_sft = outputs.loss
             
-            h_real = outputs.hidden_states[-1] 
-            z_all, _ = proj(h_real) 
+            h_real = outputs.hidden_states[-1]
+            z_all, _ = proj(h_real.float())
             
-            # 1. Pinpoint the last Token position of Prompt as the starting point of HNN Evolution Z 0
-            last_p_idx = (labels == -100).sum(dim=1) - 1
-            z0 = z_all[torch.arange(z_all.size(0)), last_p_idx]
-            
-            # 2. dynamic access to the current Batch of all internal samples, the true answer Token maximum length
+            # 1. Pinpoint the token immediately before the answer span. Padding labels
+            # are also -100, so counting -100 labels would choose a padding token.
+            answer_mask = labels != -100
+            answer_lengths = answer_mask.sum(dim=1)
+            valid_samples = answer_lengths > 0
 
-            max_ans_len = (labels != -100).sum(dim=1).max().item()
-            if max_ans_len == 0: 
-                max_ans_len = 1
-                
-            # The time step is only divided into Max + 1 steps
-            t_steps = torch.linspace(0.0, 1.0, max_ans_len + 1).to(device)
-            
-            # 3. Use Ode to solve the HNN potential trajectory (at this time, only the answer span evolution)
-            hnn_f.float()
-            z_traj = odeint(hnn_f, z0.float(), t_steps, method='rk4').transpose(0, 1).to(torch.bfloat16)
-            hnn_f.bfloat16()
-            
-            # 4. The change velocity corresponding to the low-dimensional trajectory on the HNN side is calculated and projected to the high-dimensional hidden space
-            # v_hnn_high : [Batch, max_ans_len, High_dim]
-            v_hnn_latent = z_traj[:, 1:, :] - z_traj[:, :-1, :]
-            # v_hnn_high = proj.up(v_hnn_latent) 
-            with torch.no_grad():
-                v_hnn_high = proj.up(v_hnn_latent.detach())
-            
-            # 5. The true answer velocity vectors are extracted from each sample to filter Padding and misalignment
-            cos_sim_total = 0.0
-            valid_count = 0
-            
-            for i in range(inputs.size(0)):
-                ans_indices = torch.where(labels[i] != -100)[0]
-                if len(ans_indices) == 0: 
-                    continue
-                
-                actual_positions = torch.cat([last_p_idx[i].unsqueeze(0), ans_indices])
-                
-                v_real_i = h_real[i, actual_positions[1:], :] - h_real[i, actual_positions[:-1], :]
-                
-                current_ans_len = len(ans_indices)
-                v_hnn_high_i = v_hnn_high[i, :current_ans_len, :]
-                
-                cos_sim_i = torch.nn.functional.cosine_similarity(v_hnn_high_i, v_real_i, dim=-1)
-                cos_sim_total += cos_sim_i.mean()
-                valid_count += 1
-                
-            if valid_count > 0:
+            if valid_samples.any():
+                first_answer_idx = answer_mask.to(torch.int64).argmax(dim=1)
+                last_p_idx = (first_answer_idx - 1).clamp(min=0)
+                z0 = z_all[torch.arange(z_all.size(0), device=device), last_p_idx]
+
+                # 2. dynamic access to the current Batch of all internal samples, the true answer Token maximum length
+                max_ans_len = answer_lengths.max().item()
+
+                # The time step is only divided into Max + 1 steps
+                t_steps = torch.linspace(0.0, 1.0, max_ans_len + 1).to(device)
+
+                # 3. Use Ode to solve the HNN potential trajectory (at this time, only the answer span evolution)
+                z_traj = odeint(hnn_f, z0.float(), t_steps, method='rk4').transpose(0, 1)
+
+                # 4. The change velocity corresponding to the low-dimensional trajectory on the HNN side is calculated and projected to the high-dimensional hidden space
+                # v_hnn_high : [Batch, max_ans_len, High_dim]
+                v_hnn_latent = z_traj[:, 1:, :] - z_traj[:, :-1, :]
+                # Keep the AE frozen, but preserve this graph so alignment trains the HNN.
+                v_hnn_high = proj.up(v_hnn_latent)
+
+                # 5. The true answer velocity vectors are extracted from each sample to filter Padding and misalignment
+                cos_sim_total = 0.0
+                valid_count = 0
+
+                for i in range(inputs.size(0)):
+                    ans_indices = torch.where(answer_mask[i])[0]
+                    if len(ans_indices) == 0:
+                        continue
+
+                    actual_positions = torch.cat([last_p_idx[i].unsqueeze(0), ans_indices])
+
+                    h_real_i = h_real[i].float()
+                    v_real_i = h_real_i[actual_positions[1:], :] - h_real_i[actual_positions[:-1], :]
+
+                    current_ans_len = len(ans_indices)
+                    v_hnn_high_i = v_hnn_high[i, :current_ans_len, :]
+
+                    cos_sim_i = torch.nn.functional.cosine_similarity(v_hnn_high_i, v_real_i, dim=-1)
+                    cos_sim_total += cos_sim_i.mean()
+                    valid_count += 1
+
                 loss_align = 1.0 - (cos_sim_total / valid_count)
             else:
-                loss_align = torch.tensor(0.0, device=device, dtype=torch.bfloat16)
+                loss_align = torch.tensor(0.0, device=device)
             
             # A priori regularization term of physics knowledge
             loss_phys_reg = cfg.lambda_f * sum(p.abs().sum() for p in hnn_f.f_net.parameters()) + cfg.lambda_d * hnn_f.d1.abs().sum()
@@ -255,10 +315,19 @@ def train_third_stage():
                 optimizer.zero_grad()
                 pbar.set_postfix({"SFT": f"{loss_sft.item():.3f}", "Align": f"{loss_align.item():.4f}"})
 
+        if len(train_loader) % cfg.gradient_accumulation_steps != 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(hnn_f.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+
         num_steps = len(train_loader)
         history["loss_sft"].append(epoch_sft / num_steps)
         history["loss_align"].append(epoch_align / num_steps)
         history["loss_phys_reg"].append(epoch_phys / num_steps)
+        with open(os.path.join(cfg.save_path, "history.json"), "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+            f.write("\n")
 
         save_dir = os.path.join(cfg.save_path, f"checkpoint_epoch_{epoch+1}")
         os.makedirs(save_dir, exist_ok=True)

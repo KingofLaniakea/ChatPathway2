@@ -61,7 +61,7 @@ print("[+] Model loaded successfully. Ready for evaluation.")
 def c2s_text_to_vector(text, hvg_list):
     """Convert expression sequence text into a numerical profile vector based on ranks."""
     vector = np.zeros(len(hvg_list))
-    clean_text = text.replace('<\ctrl100>', '').replace('.', '')
+    clean_text = text.replace('<\\ctrl100>', '').replace('.', '')
     genes = clean_text.split()
     max_rank = len(genes)
     for rank, gene in enumerate(genes):

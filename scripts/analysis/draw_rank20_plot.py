@@ -33,7 +33,7 @@ gemma_sample = load_first_sample(gemma_jsonl)
 
 # ================= 2. Convert Text to Rank Maps =================
 def text_to_rank_dict(text):
-    clean_text = text.replace('<\ctrl100>', '').replace('.', '')
+    clean_text = text.replace('<\\ctrl100>', '').replace('.', '')
     genes = clean_text.split()
     max_rank = len(genes)
     return {gene: max_rank - i for i, gene in enumerate(genes)}
