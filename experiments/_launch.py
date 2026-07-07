@@ -7,6 +7,27 @@ import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
+
+
+DEFAULT_ASSET_ROOT = "/root/autodl-tmp"
+
+
+def asset_root() -> str:
+    """Return the runtime asset root for models, data, checkpoints, and runs."""
+
+    return os.environ.get("CHATPATHWAY_ASSET_ROOT", DEFAULT_ASSET_ROOT)
+
+
+def asset_path(relative_path: str) -> str:
+    """Resolve a path under ``CHATPATHWAY_ASSET_ROOT``.
+
+    Experiment wrappers should pass relative runtime paths through this helper
+    so moving from AutoDL to another server only requires setting one
+    environment variable.
+    """
+
+    return str(Path(asset_root()) / relative_path)
 
 
 def _command_string(command: list[str]) -> str:

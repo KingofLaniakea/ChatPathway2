@@ -24,4 +24,8 @@ the current inference adapter choice is recorded in
 PHNN training variant is described in
 [docs/PHNN_TRAINING_DESIGN.md](docs/PHNN_TRAINING_DESIGN.md). Experiment rows
 and launch/preflight commands live in
-[experiments/README.md](experiments/README.md).
+[experiments/README.md](experiments/README.md), with a CSV matrix at
+[experiments/EXPERIMENT_MATRIX.csv](experiments/EXPERIMENT_MATRIX.csv) and a
+diagram at [experiments/TRAINING_MATRIX.md](experiments/TRAINING_MATRIX.md).
+Server handoff and new-server setup are tracked in
+[docs/SERVER_DEVELOPMENT_PLAN.md](docs/SERVER_DEVELOPMENT_PLAN.md).

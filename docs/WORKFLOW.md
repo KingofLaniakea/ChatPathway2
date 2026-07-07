@@ -120,8 +120,8 @@ Use `experiments/run_experiment.py` when comparing training/inference variants:
 ```bash
 python -m experiments.run_experiment list
 python -m experiments.run_experiment axes
-python -m experiments.run_experiment train a02_frameworka_phnn_prompt_regularized_lora --dry-run
-python -m experiments.run_experiment plan --phase train --format shell --output /root/autodl-tmp/runs/experiment_plans/train_all.sh
+python -m experiments.run_experiment train a03_frameworka_phnn_prompt_regularized_lora --dry-run
+python -m experiments.run_experiment plan --phase train --format shell --output "$CHATPATHWAY_ASSET_ROOT/runs/experiment_plans/train_all.sh"
 ```
 
 Each implemented row under `experiments/methods/` has a concrete `train.py` and
@@ -132,15 +132,15 @@ Runtime prerequisites and expected outputs are recorded in
 `experiments/runtime_manifest.json`; inspect one row with:
 
 ```bash
-python -m experiments.run_experiment runtime a05_latent_neural_ode_teacher_rollout
+python -m experiments.run_experiment runtime b01_latent_neural_ode_teacher_rollout
 ```
 
 Before launching server jobs, check that required models, datasets, adapters, AE
 checkpoints, teacher checkpoints, and output parent directories exist:
 
 ```bash
-python -m experiments.run_experiment check-assets --phase train --ids a01_frameworka_hnn_regularized_lora --strict
-python -m experiments.run_experiment check-assets --phase infer --ids a01_frameworka_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase train --ids a02_frameworka_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase infer --ids a02_frameworka_hnn_regularized_lora --strict
 python -m experiments.run_experiment check-assets --phase both --create-output-dirs
 ```
 
@@ -158,7 +158,7 @@ The wrapper supports:
 - `run-all` for selected batches with `--ids`, `--exclude`, `--start-at`,
   `--stop-after`, and `--contains`.
 - Per-row argument passthrough after `--`, for example
-  `python -m experiments.run_experiment train a01_frameworka_hnn_regularized_lora -- --epochs 1 --save-dir /tmp/frameworka_test`.
+  `python -m experiments.run_experiment train a02_frameworka_hnn_regularized_lora -- --epochs 1 --save-dir /tmp/frameworka_test`.
 - `plan` for shell, JSONL, or TSV command manifests.
 - `check-assets` for manifest-driven runtime dependency checks.
 - `consistency` for checking that wrapper dry-run commands match
@@ -175,38 +175,38 @@ The wrapper supports:
 
 The implemented latent-dynamics teacher rows are:
 
-- `a05_latent_neural_ode_teacher_rollout`
-- `a06_latent_gradient_flow_teacher_rollout`
-- `a07_latent_koopman_teacher_rollout`
-- `a08_latent_generic_teacher_rollout`
-- `a09_latent_sindy_teacher_rollout`
-- `a12_latent_ode_encoder_teacher_rollout`
+- `b01_latent_neural_ode_teacher_rollout`
+- `b02_latent_gradient_flow_teacher_rollout`
+- `b03_latent_koopman_teacher_rollout`
+- `b04_latent_generic_teacher_rollout`
+- `b05_latent_sindy_teacher_rollout`
+- `b06_latent_ode_encoder_teacher_rollout`
 
 They train from frozen Qwen+LoRA plus frozen AE latent trajectories and infer by
 rollout scoring. They do not generate pathway text directly.
 
 The implemented rollout-assisted inference rows are:
 
-- `a10_neural_ode_rollout_rerank`
-- `a11_neural_ode_residual_injection`
+- `c00_neural_ode_rollout_rerank`
+- `c01_neural_ode_residual_injection`
 
 These use a trained latent dynamics teacher at inference time. They are kept as
 separate prototypes and do not replace `method/inference/pathway.py`.
 
 The implemented staged teacher-to-LoRA row is:
 
-- `a13_neural_ode_distilled_lora_direct`
+- `d00_neural_ode_distilled_lora_direct`
 
 It uses a trained Neural ODE teacher during training only; inference loads the
 resulting adapter directly.
 
 The implemented distributed and generalized joint-training rows are:
 
-- `a14_sft_lora_ddp_direct`
-- `a15_joint_neural_ode_regularized_lora`
-- `a16_joint_gradient_flow_regularized_lora`
+- `a01_sft_lora_ddp_direct`
+- `d01_joint_neural_ode_regularized_lora`
+- `d02_joint_gradient_flow_regularized_lora`
 
-`a14` uses `torch.distributed.run` through the wrapper. `a15` and `a16` jointly
+`a01` uses `torch.distributed.run` through the wrapper. `d01` and `d02` jointly
 update LoRA plus the selected middle network, then perform direct LoRA
 generation at inference time.
 
