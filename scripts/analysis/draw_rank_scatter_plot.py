@@ -39,8 +39,8 @@ gemma_sample = load_first_sample_ranks(gemma_jsonl)
 # ================= 2. Text to Rank Converters =================
 def get_rank_metrics(sample_dict):
     # Standardizing clean strings
-    gt_clean = sample_dict["ground_truth"].replace('<\ctrl100>', '').replace('.', '')
-    pred_clean = sample_dict["prediction"].replace('<\ctrl100>', '').replace('.', '')
+    gt_clean = sample_dict["ground_truth"].replace('<\\ctrl100>', '').replace('.', '')
+    pred_clean = sample_dict["prediction"].replace('<\\ctrl100>', '').replace('.', '')
     
     gt_genes = gt_clean.split()
     pred_genes = pred_clean.split()

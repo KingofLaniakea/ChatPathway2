@@ -64,7 +64,7 @@ print("[+] 模型加载完毕，进入评估状态。")
 # ================= 4. C2S 文本转向量工具 =================
 def c2s_text_to_vector(text, hvg_list):
     vector = np.zeros(len(hvg_list))
-    clean_text = text.replace('<\ctrl100>', '').replace('.', '')
+    clean_text = text.replace('<\\ctrl100>', '').replace('.', '')
     genes = clean_text.split()
     max_rank = len(genes)
     for rank, gene in enumerate(genes):

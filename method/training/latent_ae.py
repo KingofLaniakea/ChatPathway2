@@ -159,18 +159,14 @@ def train_ae():
         collate_fn=collate_fn
     )
     
-    history = {"rec_mse": []}
-    # history = {
-    #     "rec_mse": [],
-    #     "rec_cos": []
-    # }
+    history = {"rec_mse": [], "rec_cos": []}
     
     for epoch in range(cfg.epochs):
         ae_proj.train()
         
-        e_rec = 0
-        # e_mse = 0
-        # e_cos = 0
+        e_mse = 0.0
+        e_cos = 0.0
+        valid_batches = 0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
         
@@ -213,14 +209,19 @@ def train_ae():
                 optimizer.step()
                 optimizer.zero_grad()
 
-            # e_rec += loss_rec.item()
             e_mse += mse_loss.item()
             e_cos += cos_loss.item()
+            valid_batches += 1
             # pbar.set_postfix({"MSE": f"{loss_rec.item():.6f}"})
             pbar.set_postfix({"Loss": f"{loss_rec.item():.4f}", "MSE": f"{mse_loss.item():.4f}", "Cos": f"{cos_loss.item():.4f}"})
 
-        avg_mse = e_mse / len(train_loader)
-        avg_cos = e_cos / len(train_loader)
+        if len(train_loader) % cfg.gradient_accumulation_steps != 0:
+            torch.nn.utils.clip_grad_norm_(ae_proj.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+
+        avg_mse = e_mse / max(valid_batches, 1)
+        avg_cos = e_cos / max(valid_batches, 1)
         history["rec_mse"].append(avg_mse)
         history["rec_cos"].append(avg_cos)
         
