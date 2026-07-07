@@ -20,8 +20,8 @@ experiments must rely on files in this tree.
 | Method training | `method/training/latent_ae.py` | Migrated from the audited server snapshot file `method/Qwen3_8B_Latent_AE_new.py`, imported in `a419f53` and reorganized in `2044df2`. | Current AE projector training entry point; this revision fixes loss-history initialization and tail gradient accumulation. |
 | Method training | `method/training/framework_a.py` | Migrated from the audited server snapshot file `method/Qwen3_8B_Method_FrameworkA.py`, imported in `a419f53` and reorganized in `2044df2`. | Current FrameworkA training entry point; this revision restores alignment gradients to HNN and fixes answer-span indexing. |
 | Method training prototype | `method/training/framework_a_phnn.py` | Newly copied from maintained `method/training/framework_a.py` and edited in ChatPathway2. It is not a migrated server result. | Experimental PHNN training variant with explicit `J`, positive diagonal `R`, and prompt-latent control input `u`. |
-| Method training prototype | `method/training/lejepa_pathway.py` | Newly authored in ChatPathway2, informed by the LeJEPA-style latent prediction paradigm but not copied from an external repository. | Exploratory pathway-language JEPA probe: prompt latent predicts answer latent with anti-collapse regularization. |
-| Method inference prototype | `method/inference/lejepa_pathway.py` | Newly authored in ChatPathway2 to pair with `method/training/lejepa_pathway.py`. | Non-generative latent scoring for the pathway LeJEPA probe. |
+| Method training prototype | `method/training/lejepa_pathway.py` | Newly authored in ChatPathway2, informed by the LeJEPA-style latent prediction paradigm but not copied from an external repository. | Lowest-priority exploratory pathway-language JEPA probe: prompt latent predicts answer latent with anti-collapse regularization. |
+| Method inference prototype | `method/inference/lejepa_pathway.py` | Newly authored in ChatPathway2 to pair with `method/training/lejepa_pathway.py`. | Lowest-priority non-generative latent scoring for the pathway LeJEPA probe. |
 | Method dynamics prototypes | `method/dynamics/latent_teacher.py`, `method/training/latent_dynamics_teacher.py`, `method/inference/latent_dynamics_rollout.py` | Newly authored in ChatPathway2. | Complete train/inference path for Neural ODE, encoder-conditioned Latent ODE, gradient-flow energy, GENERIC, Koopman, and SINDy latent dynamics teachers. |
 | Method training prototype | `method/training/dynamics_distilled_lora.py` | Newly authored in ChatPathway2. | Staged training path that freezes a trained latent dynamics teacher and AE, then updates only LoRA with CE plus decoded-velocity distillation. |
 | Method training prototype | `method/training/joint_lora_dynamics.py` | Newly authored in ChatPathway2. | Generalized FrameworkA-style joint LoRA plus dynamics training for Neural ODE, Latent ODE, gradient-flow, GENERIC, Koopman, and SINDy modules. |
@@ -31,7 +31,7 @@ experiments must rely on files in this tree.
 | Legacy method training | `method/training/legacy/joint_sft_hnn_ddp.py` | Migrated from `method/Qwen3_8B_Method_4_1_2_1.py`, imported in `a419f53`, exact rename in `2044df2`. | Historical joint SFT/HNN reference. |
 | Method inference | `method/inference/pathway.py` | Migrated from server `method/inference.py`, then made configurable in commit `ff2a71a` and reorganized in `2044df2`. | Current pathway generation entry point. |
 | Method inference | `method/inference/pathway_batch.py` | Migrated from server `method/inference_batch.py`, imported in `a419f53` and reorganized in `2044df2`. | Historical batch inference variant. |
-| C2S prep/train/eval scripts | `scripts/c2s/**` | Migrated from server scripts in `a419f53` and grouped under `scripts/` in `2044df2`; `scripts/c2s/train/train_c2s_single.py` is maintained in this revision. | Historical and operational C2S workflows; the maintained single-GPU Qwen C2S trainer is used by matrix row `e00`. |
+| C2S prep/train/eval scripts | `scripts/c2s/**` | Migrated from server scripts in `a419f53` and grouped under `scripts/` in `2044df2`; `scripts/c2s/train/train_c2s_single.py` is maintained in this revision. | Historical and operational C2S workflows; the maintained single-GPU Qwen C2S trainer is used by optional matrix row `x00`. |
 | Data/model/analysis scripts | `scripts/data/**`, `scripts/model/**`, `scripts/analysis/**`, `scripts/inference/**` | Migrated from the audited server snapshot in `a419f53` and grouped in `2044df2`. | Supporting workflows and exploratory analysis. |
 | SCGEN baseline | `baselines/scgen/main.py` | Migrated from server `SCGEN/main.py` in `a419f53` and reorganized in `2044df2`. | External baseline code, separate from ChatPathway method code. |
 | Downstream common utilities | `downstream/common/**` | Newly authored during the ChatPathway2 downstream setup, then reorganized in `2044df2`. | Shared parser, IO, and sequence-scoring utilities. |
@@ -91,6 +91,8 @@ rows:
 - `method/training/lejepa_pathway.py` and `method/inference/lejepa_pathway.py`
   - Add a LeJEPA-style pathway-language exploration path at the method layer.
   - This is a latent prediction/scoring probe, not a text generation model.
+  - This is assigned to the lowest-priority speculative `z` layer, outside the
+    first core dynamics benchmark.
 - `method/dynamics/latent_teacher.py`, `method/training/latent_dynamics_teacher.py`,
   and `method/inference/latent_dynamics_rollout.py`
   - Add controlled Neural ODE, encoder-conditioned Latent ODE, gradient-flow
@@ -118,6 +120,8 @@ rows:
     `--limit`, run metadata, loss history, and tail gradient accumulation.
 - `experiments/_launch.py`
   - Adds a `torchrun` launcher helper used by the distributed SFT matrix row.
+  - Resolves wrapper default model/data/checkpoint paths through
+    `chatpathway.config.json`.
   - Adds `CHATPATHWAY_LAUNCH_DRY_RUN=1` support so wrapper defaults can be
     inspected without importing model/runtime dependencies.
 - `experiments/run_experiment.py`
@@ -138,8 +142,8 @@ rows:
   - Checks base models, datasets, LoRA/AE/dynamics checkpoints, row dependency
     outputs, trained artifacts needed for inference, and output parent
     directories.
-  - Supports `--asset-root` or `CHATPATHWAY_ASSET_ROOT` for local mirrors of the
-    AutoDL asset tree.
+  - Reads `chatpathway.config.json` by default and supports `--profile` or a
+    temporary `--asset-root` override for local mirrors of a server asset tree.
 - `experiments/prepare_smoke_inputs.py`
   - Adds a dependency-light AutoDL helper that creates tiny pathway CSV and C2S
     JSONL inputs for short training/inference smoke tests.
@@ -147,6 +151,9 @@ rows:
   - Records per-row runtime prerequisites, phase-specific train/infer
     prerequisites, expected training outputs, inference-loaded artifacts,
     expected inference outputs, and dependency notes for AutoDL execution.
+  - Records default expanded AutoDL paths; non-AutoDL servers rewrite those paths
+    through the configured runtime profile during asset checks and wrapper
+    launch.
 - `experiments/validate_matrix.py`
   - Validates both the implemented matrix rows and runtime manifest coverage.
 - `method/inference/rollout_rerank.py`

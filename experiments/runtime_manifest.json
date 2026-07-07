@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-07",
+  "version": "2026-07-07c",
   "asset_root": "/root/autodl-tmp",
   "rows": {
     "a00_sft_lora_direct": {
@@ -52,7 +52,7 @@
       ],
       "runtime_notes": "Distributed SFT baseline launched through torchrun."
     },
-    "a02_frameworka_hnn_regularized_lora": {
+    "b00_frameworka_force_damped_hnn_regularized_lora": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -82,7 +82,7 @@
       ],
       "runtime_notes": "FrameworkA joint LoRA + HNN-style regularization; direct inference uses the LoRA adapter only."
     },
-    "a03_frameworka_phnn_prompt_regularized_lora": {
+    "b01_frameworka_phnn_prompt_regularized_lora": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -112,35 +112,7 @@
       ],
       "runtime_notes": "PHNN prompt-control prototype; direct inference uses the trained adapter only."
     },
-    "b00_lejepa_pathway_sentence": {
-      "requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/pathway_lejepa_sentence/lejepa_epoch_3.pt"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/pathway_lejepa_sentence/lejepa_epoch_3.pt"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/lejepa_pathway/test_7_species_lejepa_scores.jsonl"
-      ],
-      "runtime_notes": "Sentence/prompt-level LeJEPA-style latent prediction probe; non-generative inference."
-    },
-    "b01_latent_neural_ode_teacher_rollout": {
+    "b02_latent_neural_ode_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -171,7 +143,7 @@
       ],
       "runtime_notes": "Dynamics-only Neural ODE teacher and rollout scoring."
     },
-    "b02_latent_gradient_flow_teacher_rollout": {
+    "b03_latent_gradient_flow_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -202,7 +174,7 @@
       ],
       "runtime_notes": "Dynamics-only gradient-flow energy teacher and rollout scoring."
     },
-    "b03_latent_koopman_teacher_rollout": {
+    "b04_latent_koopman_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -233,7 +205,7 @@
       ],
       "runtime_notes": "Dynamics-only Koopman teacher and rollout scoring."
     },
-    "b04_latent_generic_teacher_rollout": {
+    "b05_latent_generic_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -264,7 +236,7 @@
       ],
       "runtime_notes": "Dynamics-only GENERIC-style teacher and rollout scoring."
     },
-    "b05_latent_sindy_teacher_rollout": {
+    "b06_latent_sindy_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -295,7 +267,7 @@
       ],
       "runtime_notes": "Dynamics-only sparse SINDy teacher and rollout scoring."
     },
-    "b06_latent_ode_encoder_teacher_rollout": {
+    "b07_latent_ode_encoder_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -328,7 +300,7 @@
     },
     "c00_neural_ode_rollout_rerank": {
       "requires": [
-        "b01_latent_neural_ode_teacher_rollout",
+        "b02_latent_neural_ode_teacher_rollout",
         "/root/autodl-tmp/runs/inference/frameworka_1/test_7_species_frameworka_1_epoch4.csv"
       ],
       "train_requires": [
@@ -356,7 +328,7 @@
     },
     "c01_neural_ode_residual_injection": {
       "requires": [
-        "b01_latent_neural_ode_teacher_rollout",
+        "b02_latent_neural_ode_teacher_rollout",
         "/root/autodl-tmp/data/test_7_species_dataset.csv"
       ],
       "train_requires": [
@@ -384,12 +356,12 @@
     },
     "d00_neural_ode_distilled_lora_direct": {
       "requires": [
-        "b01_latent_neural_ode_teacher_rollout",
+        "b02_latent_neural_ode_teacher_rollout",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt"
       ],
       "train_requires": [
-        "b01_latent_neural_ode_teacher_rollout",
+        "b02_latent_neural_ode_teacher_rollout",
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
@@ -470,7 +442,7 @@
       ],
       "runtime_notes": "Joint LoRA + gradient-flow regularization; direct generation uses the trained adapter."
     },
-    "e00_c2s_transfer_qwen": {
+    "x00_c2s_transfer_qwen": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
@@ -496,13 +468,40 @@
         "/root/autodl-tmp/runs/c2s/jurkat_ours_results_epoch5_5percent.jsonl"
       ],
       "runtime_notes": "Task VI C2S transfer/application row using the 5 percent small split."
+    },
+    "z00_lejepa_pathway_sentence": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+        "/root/autodl-tmp/data/train_11_species_dataset.csv",
+        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/pathway_lejepa_sentence/lejepa_epoch_3.pt"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/pathway_lejepa_sentence/lejepa_epoch_3.pt"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/lejepa_pathway/test_7_species_lejepa_scores.jsonl"
+      ],
+      "runtime_notes": "Lowest-priority speculative LeJEPA-style latent prediction probe; non-generative inference."
     }
   },
-  "asset_root_env": "CHATPATHWAY_ASSET_ROOT",
   "storage_plan": {
     "repo_checkout": "ChatPathway2",
     "default_asset_root": "/root/autodl-tmp",
-    "override": "Set CHATPATHWAY_ASSET_ROOT on a new server, or pass --asset-root to check-assets.",
+    "override": "Edit chatpathway.config.json active_profile or profile asset_root for each server.",
     "subdirs": {
       "models": "Base LLMs and external baselines.",
       "data": "Pathway CSVs, KEGG/reference artifacts, and C2S JSONL/H5AD files.",
@@ -521,5 +520,6 @@
     "legacy_stage3_c2s_seed_lora": "checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
     "c2s_train_small_5percent": "data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl",
     "c2s_test_small_5percent": "data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
-  }
+  },
+  "config_file": "chatpathway.config.json"
 }

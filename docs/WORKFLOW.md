@@ -5,7 +5,8 @@ repository. It intentionally does not depend on `PathwayDynamicsLLM`; that tree
 is an exploratory refactor and is not an authority for reproducing the current
 ChatPathway2 results.
 
-Large assets live outside Git under `/root/autodl-tmp`:
+Large assets live outside Git. The active runtime location is configured in
+`chatpathway.config.json`; the default AutoDL profile maps to `/root/autodl-tmp`:
 
 ```text
 /root/autodl-tmp/models       base models
@@ -120,8 +121,8 @@ Use `experiments/run_experiment.py` when comparing training/inference variants:
 ```bash
 python -m experiments.run_experiment list
 python -m experiments.run_experiment axes
-python -m experiments.run_experiment train a03_frameworka_phnn_prompt_regularized_lora --dry-run
-python -m experiments.run_experiment plan --phase train --format shell --output "$CHATPATHWAY_ASSET_ROOT/runs/experiment_plans/train_all.sh"
+python -m experiments.run_experiment train b01_frameworka_phnn_prompt_regularized_lora --dry-run
+python -m experiments.run_experiment plan --phase train --format shell --output runs/experiment_plans/train_all.sh
 ```
 
 Each implemented row under `experiments/methods/` has a concrete `train.py` and
@@ -132,23 +133,24 @@ Runtime prerequisites and expected outputs are recorded in
 `experiments/runtime_manifest.json`; inspect one row with:
 
 ```bash
-python -m experiments.run_experiment runtime b01_latent_neural_ode_teacher_rollout
+python -m experiments.run_experiment runtime b02_latent_neural_ode_teacher_rollout
 ```
 
 Before launching server jobs, check that required models, datasets, adapters, AE
 checkpoints, teacher checkpoints, and output parent directories exist:
 
 ```bash
-python -m experiments.run_experiment check-assets --phase train --ids a02_frameworka_hnn_regularized_lora --strict
-python -m experiments.run_experiment check-assets --phase infer --ids a02_frameworka_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase train --ids b00_frameworka_force_damped_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase infer --ids b00_frameworka_force_damped_hnn_regularized_lora --strict
 python -m experiments.run_experiment check-assets --phase both --create-output-dirs
 ```
 
-Use `--asset-root /path/to/autodl-tmp` or `CHATPATHWAY_ASSET_ROOT` only when
-checking a local mirror of the AutoDL asset tree. Inference checks also require
-the current row's `infer_artifacts`, because default inference wrappers load the
-trained adapter or dynamics teacher produced by that row. `train_outputs` can
-contain training-only side artifacts such as `hnn_func.pt`, `phnn_func.pt`, or
+The default asset root comes from `chatpathway.config.json`. Use `--profile` to
+check a different configured server profile, or `--asset-root` as a temporary
+preflight override. Inference checks also require the current row's
+`infer_artifacts`, because default inference wrappers load the trained adapter
+or dynamics teacher produced by that row. `train_outputs` can contain
+training-only side artifacts such as `hnn_func.pt`, `phnn_func.pt`, or
 `dynamics_func.pt`; direct text generation does not load those files unless the
 row's inference script explicitly says so.
 
@@ -158,7 +160,7 @@ The wrapper supports:
 - `run-all` for selected batches with `--ids`, `--exclude`, `--start-at`,
   `--stop-after`, and `--contains`.
 - Per-row argument passthrough after `--`, for example
-  `python -m experiments.run_experiment train a02_frameworka_hnn_regularized_lora -- --epochs 1 --save-dir /tmp/frameworka_test`.
+  `python -m experiments.run_experiment train b00_frameworka_force_damped_hnn_regularized_lora -- --epochs 1 --save-dir /tmp/frameworka_test`.
 - `plan` for shell, JSONL, or TSV command manifests.
 - `check-assets` for manifest-driven runtime dependency checks.
 - `consistency` for checking that wrapper dry-run commands match
@@ -175,12 +177,12 @@ The wrapper supports:
 
 The implemented latent-dynamics teacher rows are:
 
-- `b01_latent_neural_ode_teacher_rollout`
-- `b02_latent_gradient_flow_teacher_rollout`
-- `b03_latent_koopman_teacher_rollout`
-- `b04_latent_generic_teacher_rollout`
-- `b05_latent_sindy_teacher_rollout`
-- `b06_latent_ode_encoder_teacher_rollout`
+- `b02_latent_neural_ode_teacher_rollout`
+- `b03_latent_gradient_flow_teacher_rollout`
+- `b04_latent_koopman_teacher_rollout`
+- `b05_latent_generic_teacher_rollout`
+- `b06_latent_sindy_teacher_rollout`
+- `b07_latent_ode_encoder_teacher_rollout`
 
 They train from frozen Qwen+LoRA plus frozen AE latent trajectories and infer by
 rollout scoring. They do not generate pathway text directly.

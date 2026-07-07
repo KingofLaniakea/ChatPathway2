@@ -267,7 +267,8 @@ def main() -> None:
 
     check_assets = sub.add_parser("check-assets", help="Check runtime data/checkpoint paths from runtime_manifest.json.")
     check_assets.add_argument("--phase", choices=("train", "infer", "both"), default="both")
-    check_assets.add_argument("--asset-root", help="Override manifest asset_root, for example a local mirror of /root/autodl-tmp.")
+    check_assets.add_argument("--asset-root", help="Temporarily override the asset root from chatpathway.config.json.")
+    check_assets.add_argument("--profile", help="Runtime profile name from chatpathway.config.json.")
     check_assets.add_argument("--check-outputs", action="store_true", help="Also require expected result artifacts to exist.")
     check_assets.add_argument("--create-output-dirs", action="store_true", help="Create output parent directories if missing.")
     check_assets.add_argument("--jsonl", help="Optional JSONL output path.")
@@ -390,6 +391,8 @@ def main() -> None:
         ]
         if args.asset_root:
             command.extend(["--asset-root", args.asset_root])
+        if args.profile:
+            command.extend(["--profile", args.profile])
         if args.check_outputs:
             command.append("--check-outputs")
         if args.create_output_dirs:

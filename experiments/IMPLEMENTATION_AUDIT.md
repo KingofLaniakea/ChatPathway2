@@ -20,25 +20,25 @@ local completion requirement.
 | Runtime assets are checkable before server runs | `experiments/check_runtime_assets.py`; `python -m experiments.run_experiment check-assets ...` | Implemented; strict success is a runtime-only server check |
 | Smoke inputs are reproducible | `experiments/prepare_smoke_inputs.py`; `python -m experiments.run_experiment prepare-smoke ...` | Implemented; real files are created where the source datasets exist |
 | High-level wrapper can launch/list/plan/run batches | `experiments/run_experiment.py` supports `list`, `axes`, `show`, `runtime`, `train`, `infer`, `pipeline`, `run-all`, `plan`, `audit`, `consistency`, `check-assets`, and `prepare-smoke` | Implemented |
-| LeJEPA-style pathway-language probe exists | `method/training/lejepa_pathway.py`, `method/inference/lejepa_pathway.py`, row `b00_lejepa_pathway_sentence` | Implemented structurally |
+| LeJEPA-style pathway-language probe exists | `method/training/lejepa_pathway.py`, `method/inference/lejepa_pathway.py`, row `z00_lejepa_pathway_sentence` | Implemented structurally |
 
 ## Implemented Rows
 
 | Row | Train module | Inference module | Inference role |
 | --- | --- | --- | --- |
 | `a00_sft_lora_direct` | `method.training.sft` | `method.inference.pathway` | Direct LoRA generation |
-| `a02_frameworka_hnn_regularized_lora` | `method.training.framework_a` | `method.inference.pathway` | Direct LoRA generation; HNN affects adapter during training |
-| `a03_frameworka_phnn_prompt_regularized_lora` | `method.training.framework_a_phnn` | `method.inference.pathway` | Direct LoRA generation; PHNN prototype affects adapter during training |
-| `b00_lejepa_pathway_sentence` | `method.training.lejepa_pathway` | `method.inference.lejepa_pathway` | Non-generative latent scoring |
-| `e00_c2s_transfer_qwen` | `scripts.c2s.train.train_c2s_single` | `downstream.tasks.task6_perturbed_cell.generation` | C2S generation for Task VI |
-| `b01_latent_neural_ode_teacher_rollout` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b02_latent_gradient_flow_teacher_rollout` | `method.training.latent_dynamics_teacher --variant gradient_flow` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b03_latent_koopman_teacher_rollout` | `method.training.latent_dynamics_teacher --variant koopman` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b04_latent_generic_teacher_rollout` | `method.training.latent_dynamics_teacher --variant generic` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b05_latent_sindy_teacher_rollout` | `method.training.latent_dynamics_teacher --variant sindy` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
+| `b00_frameworka_force_damped_hnn_regularized_lora` | `method.training.framework_a` | `method.inference.pathway` | Direct LoRA generation; HNN affects adapter during training |
+| `b01_frameworka_phnn_prompt_regularized_lora` | `method.training.framework_a_phnn` | `method.inference.pathway` | Direct LoRA generation; PHNN prototype affects adapter during training |
+| `z00_lejepa_pathway_sentence` | `method.training.lejepa_pathway` | `method.inference.lejepa_pathway` | Non-generative latent scoring |
+| `x00_c2s_transfer_qwen` | `scripts.c2s.train.train_c2s_single` | `downstream.tasks.task6_perturbed_cell.generation` | C2S generation for Task VI |
+| `b02_latent_neural_ode_teacher_rollout` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
+| `b03_latent_gradient_flow_teacher_rollout` | `method.training.latent_dynamics_teacher --variant gradient_flow` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
+| `b04_latent_koopman_teacher_rollout` | `method.training.latent_dynamics_teacher --variant koopman` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
+| `b05_latent_generic_teacher_rollout` | `method.training.latent_dynamics_teacher --variant generic` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
+| `b06_latent_sindy_teacher_rollout` | `method.training.latent_dynamics_teacher --variant sindy` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
 | `c00_neural_ode_rollout_rerank` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.rollout_rerank` | Rollout-assisted reranking |
 | `c01_neural_ode_residual_injection` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.rollout_residual_injection` | Rollout-assisted generation prototype |
-| `b06_latent_ode_encoder_teacher_rollout` | `method.training.latent_dynamics_teacher --variant latent_ode` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
+| `b07_latent_ode_encoder_teacher_rollout` | `method.training.latent_dynamics_teacher --variant latent_ode` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
 | `d00_neural_ode_distilled_lora_direct` | `method.training.dynamics_distilled_lora` | `method.inference.pathway` | Direct LoRA generation after staged teacher distillation |
 | `a01_sft_lora_ddp_direct` | `torch.distributed.run -m method.training.sft` | `method.inference.pathway` | Direct LoRA generation after DDP SFT |
 | `d01_joint_neural_ode_regularized_lora` | `method.training.joint_lora_dynamics --variant neural_ode` | `method.inference.pathway` | Direct LoRA generation after joint training |
@@ -68,12 +68,13 @@ PEFT, torchdiffeq, GPU memory, or the real datasets are valid on a server.
 ## Optional AutoDL Runtime Gates
 
 These are useful before spending GPU time, but they are not required for the Mac
-local code-correctness acceptance boundary. Run on
-`$CHATPATHWAY_ASSET_ROOT/ChatPathway2`:
+local code-correctness acceptance boundary. Run from the server checkout, for
+example `/root/autodl-tmp/ChatPathway2` with `chatpathway.config.json` set to
+the `autodl` profile:
 
 ```bash
-python -m experiments.run_experiment check-assets --phase both --strict
-python -m experiments.run_experiment check-assets --phase both --create-output-dirs
+python -m experiments.run_experiment check-assets --profile autodl --phase both --strict
+python -m experiments.run_experiment check-assets --profile autodl --phase both --create-output-dirs
 python -m experiments.run_experiment consistency --phase both --quiet
 python -m experiments.run_experiment prepare-smoke --rows 2 --overwrite
 ```
@@ -81,10 +82,10 @@ python -m experiments.run_experiment prepare-smoke --rows 2 --overwrite
 Then run a small smoke subset before full experiments:
 
 ```bash
-python -m experiments.run_experiment train a00_sft_lora_direct -- --train "$CHATPATHWAY_ASSET_ROOT/data/train_11_species_dataset_smoke.csv" --epochs 1 --save-dir "$CHATPATHWAY_ASSET_ROOT/checkpoints/smoke/qwen3_8b_sft"
-python -m experiments.run_experiment infer a00_sft_lora_direct -- --adapter "$CHATPATHWAY_ASSET_ROOT/checkpoints/smoke/qwen3_8b_sft/checkpoint_epoch_1" --input "$CHATPATHWAY_ASSET_ROOT/data/test_7_species_dataset_smoke.csv" --output "$CHATPATHWAY_ASSET_ROOT/runs/smoke/sft_epoch1.csv" --max-new-tokens 32 --overwrite
-python -m experiments.run_experiment train b01_latent_neural_ode_teacher_rollout -- --train "$CHATPATHWAY_ASSET_ROOT/data/train_11_species_dataset_smoke.csv" --epochs 1 --save-dir "$CHATPATHWAY_ASSET_ROOT/checkpoints/smoke/latent_dynamics_teachers"
-python -m experiments.run_experiment infer b01_latent_neural_ode_teacher_rollout -- --checkpoint "$CHATPATHWAY_ASSET_ROOT/checkpoints/smoke/latent_dynamics_teachers/neural_ode/neural_ode_epoch_1.pt" --input "$CHATPATHWAY_ASSET_ROOT/data/test_7_species_dataset_smoke.csv" --output "$CHATPATHWAY_ASSET_ROOT/runs/smoke/neural_ode_scores.jsonl" --limit 2 --overwrite
+python -m experiments.run_experiment train a00_sft_lora_direct -- --train /root/autodl-tmp/data/train_11_species_dataset_smoke.csv --epochs 1 --save-dir /root/autodl-tmp/checkpoints/smoke/qwen3_8b_sft
+python -m experiments.run_experiment infer a00_sft_lora_direct -- --adapter /root/autodl-tmp/checkpoints/smoke/qwen3_8b_sft/checkpoint_epoch_1 --input /root/autodl-tmp/data/test_7_species_dataset_smoke.csv --output /root/autodl-tmp/runs/smoke/sft_epoch1.csv --max-new-tokens 32 --overwrite
+python -m experiments.run_experiment train b02_latent_neural_ode_teacher_rollout -- --train /root/autodl-tmp/data/train_11_species_dataset_smoke.csv --epochs 1 --save-dir /root/autodl-tmp/checkpoints/smoke/latent_dynamics_teachers
+python -m experiments.run_experiment infer b02_latent_neural_ode_teacher_rollout -- --checkpoint /root/autodl-tmp/checkpoints/smoke/latent_dynamics_teachers/neural_ode/neural_ode_epoch_1.pt --input /root/autodl-tmp/data/test_7_species_dataset_smoke.csv --output /root/autodl-tmp/runs/smoke/neural_ode_scores.jsonl --limit 2 --overwrite
 ```
 
 Successful AutoDL runs would validate runtime assets, dependency versions, GPU

@@ -93,14 +93,14 @@ The runnable matrix currently covers:
 | Requirement dimension | Implemented rows |
 | --- | --- |
 | SFT-only direct baseline | `a00`, `a01` |
-| HNN/PHNN-style joint regularization | `a02`, `a03` |
-| JEPA-style sentence/prompt latent probe | `b00` |
-| C2S transfer/application | `e00` |
-| Dynamics-only latent teachers | `b01`-`b05`, `b06` |
+| Current forced/damped HNN and PHNN dynamics candidates | `b00`, `b01` |
+| Dynamics-only latent teachers | `b02`-`b07` |
 | Rollout-assisted inference | `c00`, `c01` |
 | Staged dynamics teacher -> LoRA distillation | `d00` |
 | Distributed training launcher | `a01` |
 | Generalized joint LoRA + ODE/energy dynamics | `d01`, `d02` |
+| Optional C2S transfer/application | `x00` |
+| Lowest-priority JEPA-style sentence/prompt latent probe | `z00` |
 
 Still-design-only axes include step-level/pathway-level granularity and the
 latent energy-field downstream task. They are listed as worthwhile directions

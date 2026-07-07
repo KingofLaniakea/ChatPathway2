@@ -1,10 +1,10 @@
 {
-  "version": "2026-07-07",
+  "version": "2026-07-07c",
   "implemented": [
     {
       "id": "a00_sft_lora_direct",
       "layer": "a",
-      "layer_name": "adapter/direct-generation training",
+      "layer_name": "SFT and non-dynamics adapter baselines",
       "title": "SFT LoRA direct generation",
       "granularity": "token-level CE",
       "middle_network": "none",
@@ -12,12 +12,12 @@
       "inference_mode": "Qwen + LoRA direct generation",
       "train_module": "experiments.methods.a00_sft_lora_direct.train",
       "infer_module": "experiments.methods.a00_sft_lora_direct.infer",
-      "notes": "Baseline; maintained SFT script uses CHATPATHWAY_ASSET_ROOT-aware defaults and can run single-process or under torchrun."
+      "notes": "Baseline; maintained SFT script uses config-file runtime defaults and can run single-process or under torchrun."
     },
     {
       "id": "a01_sft_lora_ddp_direct",
       "layer": "a",
-      "layer_name": "adapter/direct-generation training",
+      "layer_name": "SFT and non-dynamics adapter baselines",
       "title": "Distributed SFT LoRA direct generation",
       "granularity": "token-level CE",
       "middle_network": "none",
@@ -28,126 +28,113 @@
       "notes": "Wrapper launches method.training.sft through torch.distributed.run; pass --nproc-per-node after the experiment '--' separator."
     },
     {
-      "id": "a02_frameworka_hnn_regularized_lora",
-      "layer": "a",
-      "layer_name": "adapter/direct-generation training",
-      "title": "FrameworkA HNN-regularized LoRA",
+      "id": "b00_frameworka_force_damped_hnn_regularized_lora",
+      "layer": "b",
+      "layer_name": "core latent-space and dynamics model selection",
+      "title": "Current forced/damped HNN FrameworkA baseline",
       "granularity": "answer-token hidden velocity",
       "middle_network": "forced/damped HNN-style TDHNNFunc",
       "training_coupling": "LoRA and HNN jointly updated; AE frozen",
       "inference_mode": "Qwen + trained LoRA direct generation",
-      "train_module": "experiments.methods.a02_frameworka_hnn_regularized_lora.train",
-      "infer_module": "experiments.methods.a02_frameworka_hnn_regularized_lora.infer",
-      "notes": "HNN affects inference only through the saved adapter unless a separate rollout-assisted inference script is used."
+      "train_module": "experiments.methods.b00_frameworka_force_damped_hnn_regularized_lora.train",
+      "infer_module": "experiments.methods.b00_frameworka_force_damped_hnn_regularized_lora.infer",
+      "notes": "Current force/damp HNN-style baseline. It tests a dynamics-regularized second LoRA but still performs direct LoRA inference."
     },
     {
-      "id": "a03_frameworka_phnn_prompt_regularized_lora",
-      "layer": "a",
-      "layer_name": "adapter/direct-generation training",
+      "id": "b01_frameworka_phnn_prompt_regularized_lora",
+      "layer": "b",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "FrameworkA PHNN prompt-control regularized LoRA",
       "granularity": "answer-token hidden velocity with prompt-level control u",
       "middle_network": "controlled PHNN: (J-R)gradH(z,u,t)+Gu",
       "training_coupling": "LoRA and PHNN jointly updated; AE frozen",
       "inference_mode": "Qwen + trained LoRA direct generation",
-      "train_module": "experiments.methods.a03_frameworka_phnn_prompt_regularized_lora.train",
-      "infer_module": "experiments.methods.a03_frameworka_phnn_prompt_regularized_lora.infer",
-      "notes": "Experimental prototype copied from FrameworkA; no server checkpoint provenance yet."
+      "train_module": "experiments.methods.b01_frameworka_phnn_prompt_regularized_lora.train",
+      "infer_module": "experiments.methods.b01_frameworka_phnn_prompt_regularized_lora.infer",
+      "notes": "PHNN candidate for the same dynamics-model layer. It should be compared after the AE/dynamics training-coupling question is fixed."
     },
     {
-      "id": "b00_lejepa_pathway_sentence",
+      "id": "b02_latent_neural_ode_teacher_rollout",
       "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
-      "title": "LeJEPA-style pathway sentence latent prediction",
-      "granularity": "sentence/prompt-level latent prediction",
-      "middle_network": "JEPA predictor head with SIGReg-style anti-collapse regularizer",
-      "training_coupling": "frozen Qwen/optional LoRA embeddings plus trainable JEPA head",
-      "inference_mode": "latent prediction scoring, not text generation",
-      "train_module": "experiments.methods.b00_lejepa_pathway_sentence.train",
-      "infer_module": "experiments.methods.b00_lejepa_pathway_sentence.infer",
-      "notes": "Exploratory method-layer probe for pathway-language representation quality."
-    },
-    {
-      "id": "b01_latent_neural_ode_teacher_rollout",
-      "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "Controlled Neural ODE latent teacher",
       "granularity": "answer-token latent trajectory",
       "middle_network": "generic controlled Neural ODE MLP vector field",
       "training_coupling": "dynamics-only teacher: frozen Qwen+LoRA and frozen AE",
       "inference_mode": "latent rollout scoring, not text generation",
-      "train_module": "experiments.methods.b01_latent_neural_ode_teacher_rollout.train",
-      "infer_module": "experiments.methods.b01_latent_neural_ode_teacher_rollout.infer",
+      "train_module": "experiments.methods.b02_latent_neural_ode_teacher_rollout.train",
+      "infer_module": "experiments.methods.b02_latent_neural_ode_teacher_rollout.infer",
       "notes": "Learns dz/dt=f(z,u,t) on AE latent trajectories and scores rollout fit."
     },
     {
-      "id": "b02_latent_gradient_flow_teacher_rollout",
+      "id": "b03_latent_gradient_flow_teacher_rollout",
       "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "Controlled gradient-flow energy latent teacher",
       "granularity": "answer-token latent trajectory",
       "middle_network": "dissipative energy network dz/dt=-R grad E(z,u,t)+Gu",
       "training_coupling": "dynamics-only teacher: frozen Qwen+LoRA and frozen AE",
       "inference_mode": "latent rollout scoring, not text generation",
-      "train_module": "experiments.methods.b02_latent_gradient_flow_teacher_rollout.train",
-      "infer_module": "experiments.methods.b02_latent_gradient_flow_teacher_rollout.infer",
+      "train_module": "experiments.methods.b03_latent_gradient_flow_teacher_rollout.train",
+      "infer_module": "experiments.methods.b03_latent_gradient_flow_teacher_rollout.infer",
       "notes": "Energy-based dissipative baseline for interpretable latent trajectory fitting."
     },
     {
-      "id": "b03_latent_koopman_teacher_rollout",
+      "id": "b04_latent_koopman_teacher_rollout",
       "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "Controlled Koopman latent teacher",
       "granularity": "answer-token latent trajectory",
       "middle_network": "controlled approximately linear Koopman latent dynamics",
       "training_coupling": "dynamics-only teacher: frozen Qwen+LoRA and frozen AE",
       "inference_mode": "latent rollout scoring, not text generation",
-      "train_module": "experiments.methods.b03_latent_koopman_teacher_rollout.train",
-      "infer_module": "experiments.methods.b03_latent_koopman_teacher_rollout.infer",
+      "train_module": "experiments.methods.b04_latent_koopman_teacher_rollout.train",
+      "infer_module": "experiments.methods.b04_latent_koopman_teacher_rollout.infer",
       "notes": "Linear latent-evolution baseline for testing whether simple dynamics suffice."
     },
     {
-      "id": "b04_latent_generic_teacher_rollout",
+      "id": "b05_latent_generic_teacher_rollout",
       "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "Controlled GENERIC latent teacher",
       "granularity": "answer-token latent trajectory",
       "middle_network": "GENERIC-style reversible plus irreversible energy/entropy dynamics",
       "training_coupling": "dynamics-only teacher: frozen Qwen+LoRA and frozen AE",
       "inference_mode": "latent rollout scoring, not text generation",
-      "train_module": "experiments.methods.b04_latent_generic_teacher_rollout.train",
-      "infer_module": "experiments.methods.b04_latent_generic_teacher_rollout.infer",
+      "train_module": "experiments.methods.b05_latent_generic_teacher_rollout.train",
+      "infer_module": "experiments.methods.b05_latent_generic_teacher_rollout.infer",
       "notes": "Tests reversible/irreversible structured dynamics beyond HNN/PHNN."
     },
     {
-      "id": "b05_latent_sindy_teacher_rollout",
+      "id": "b06_latent_sindy_teacher_rollout",
       "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "Sparse-library SINDy latent teacher",
       "granularity": "answer-token latent trajectory",
       "middle_network": "sparse symbolic-library latent vector field",
       "training_coupling": "dynamics-only teacher: frozen Qwen+LoRA and frozen AE",
       "inference_mode": "latent rollout scoring, not text generation",
-      "train_module": "experiments.methods.b05_latent_sindy_teacher_rollout.train",
-      "infer_module": "experiments.methods.b05_latent_sindy_teacher_rollout.infer",
+      "train_module": "experiments.methods.b06_latent_sindy_teacher_rollout.train",
+      "infer_module": "experiments.methods.b06_latent_sindy_teacher_rollout.infer",
       "notes": "Uses a compact library [1,t,z,z^2,sin(z),u,z*u] with L1 sparsity."
     },
     {
-      "id": "b06_latent_ode_encoder_teacher_rollout",
+      "id": "b07_latent_ode_encoder_teacher_rollout",
       "layer": "b",
-      "layer_name": "shared representation and latent-dynamics teachers",
+      "layer_name": "core latent-space and dynamics model selection",
       "title": "Encoder-conditioned latent ODE teacher",
       "granularity": "answer-token latent trajectory with prompt-derived z0",
       "middle_network": "latent ODE: z0=g(u), dz/dt=f(z,u,t)",
       "training_coupling": "dynamics-only teacher: frozen Qwen+LoRA and frozen AE",
       "inference_mode": "latent rollout scoring, not text generation",
-      "train_module": "experiments.methods.b06_latent_ode_encoder_teacher_rollout.train",
-      "infer_module": "experiments.methods.b06_latent_ode_encoder_teacher_rollout.infer",
-      "notes": "Stricter than b01 because rollout initial state is inferred from the prompt/control vector instead of copied from the target answer trajectory."
+      "train_module": "experiments.methods.b07_latent_ode_encoder_teacher_rollout.train",
+      "infer_module": "experiments.methods.b07_latent_ode_encoder_teacher_rollout.infer",
+      "notes": "Stricter than b02 because rollout initial state is inferred from the prompt/control vector instead of copied from the target answer trajectory."
     },
     {
       "id": "c00_neural_ode_rollout_rerank",
       "layer": "c",
-      "layer_name": "rollout-assisted inference using trained dynamics",
+      "layer_name": "dynamics-aware inference after model selection",
       "title": "Neural ODE rollout-assisted candidate reranking",
       "granularity": "candidate answer latent trajectory",
       "middle_network": "trained Neural ODE latent teacher",
@@ -160,7 +147,7 @@
     {
       "id": "c01_neural_ode_residual_injection",
       "layer": "c",
-      "layer_name": "rollout-assisted inference using trained dynamics",
+      "layer_name": "dynamics-aware inference after model selection",
       "title": "Neural ODE rollout residual injection",
       "granularity": "prompt-level latent rollout residual",
       "middle_network": "trained Neural ODE latent teacher plus frozen AE decoder",
@@ -173,7 +160,7 @@
     {
       "id": "d00_neural_ode_distilled_lora_direct",
       "layer": "d",
-      "layer_name": "dynamics-to-LoRA distillation or joint regularization",
+      "layer_name": "dynamics-to-LoRA training couplings",
       "title": "Staged Neural ODE teacher distilled into LoRA",
       "granularity": "answer-token hidden velocity",
       "middle_network": "frozen trained Neural ODE latent teacher plus frozen AE decoder",
@@ -186,7 +173,7 @@
     {
       "id": "d01_joint_neural_ode_regularized_lora",
       "layer": "d",
-      "layer_name": "dynamics-to-LoRA distillation or joint regularization",
+      "layer_name": "dynamics-to-LoRA training couplings",
       "title": "Joint Neural ODE-regularized LoRA",
       "granularity": "answer-token hidden velocity",
       "middle_network": "trainable controlled Neural ODE MLP vector field",
@@ -199,7 +186,7 @@
     {
       "id": "d02_joint_gradient_flow_regularized_lora",
       "layer": "d",
-      "layer_name": "dynamics-to-LoRA distillation or joint regularization",
+      "layer_name": "dynamics-to-LoRA training couplings",
       "title": "Joint gradient-flow-regularized LoRA",
       "granularity": "answer-token hidden velocity",
       "middle_network": "trainable dissipative energy network dz/dt=-R grad E(z,u,t)+Gu",
@@ -210,17 +197,30 @@
       "notes": "Generalized FrameworkA row using method.training.joint_lora_dynamics with --variant gradient_flow."
     },
     {
-      "id": "e00_c2s_transfer_qwen",
-      "layer": "e",
-      "layer_name": "downstream transfer/application",
+      "id": "x00_c2s_transfer_qwen",
+      "layer": "x",
+      "layer_name": "optional downstream transfer/application",
       "title": "Qwen C2S transfer application",
       "granularity": "single-cell sentence generation",
       "middle_network": "none in runtime; C2S LoRA fine-tuning",
       "training_coupling": "Qwen LoRA initialized from pathway adapter in legacy scripts",
       "inference_mode": "Qwen C2S LoRA generation plus Task VI evaluator",
-      "train_module": "experiments.methods.e00_c2s_transfer_qwen.train",
-      "infer_module": "experiments.methods.e00_c2s_transfer_qwen.infer",
-      "notes": "Downstream transfer/application row with maintained argparse C2S training and Task VI generation wrappers."
+      "train_module": "experiments.methods.x00_c2s_transfer_qwen.train",
+      "infer_module": "experiments.methods.x00_c2s_transfer_qwen.infer",
+      "notes": "Optional downstream transfer/application row. Run after the core pathway dynamics model is selected."
+    },
+    {
+      "id": "z00_lejepa_pathway_sentence",
+      "layer": "z",
+      "layer_name": "lowest-priority speculative ideas",
+      "title": "Speculative LeJEPA-style pathway sentence probe",
+      "granularity": "sentence/prompt-level latent prediction",
+      "middle_network": "JEPA predictor head with SIGReg-style anti-collapse regularizer",
+      "training_coupling": "frozen Qwen/optional LoRA embeddings plus trainable JEPA head; lowest priority",
+      "inference_mode": "latent prediction scoring, not text generation",
+      "train_module": "experiments.methods.z00_lejepa_pathway_sentence.train",
+      "infer_module": "experiments.methods.z00_lejepa_pathway_sentence.infer",
+      "notes": "Lowest-priority speculative idea. Keep out of the first core dynamics benchmark unless extra time remains."
     }
   ],
   "candidate_axes": {
@@ -259,10 +259,18 @@
     ]
   },
   "layer_taxonomy": {
-    "a": "adapter/direct-generation training",
-    "b": "shared representation and latent-dynamics teachers",
-    "c": "rollout-assisted inference using trained dynamics",
-    "d": "dynamics-to-LoRA distillation or joint regularization",
-    "e": "downstream transfer/application"
+    "a": "SFT and non-dynamics adapter baselines",
+    "b": "core latent-space and dynamics model selection",
+    "c": "dynamics-aware inference after model selection",
+    "d": "dynamics-to-LoRA training couplings",
+    "x": "optional downstream transfer/application",
+    "z": "lowest-priority speculative ideas"
+  },
+  "research_questions": {
+    "q1_latent_space": "Should AE stay reconstruction-only, be trained jointly with dynamics, or be replaced by a dynamics-aware latent encoder?",
+    "q2_dynamics_family": "Which latent dynamics family is best: current forced/damped HNN baseline, PHNN, Neural ODE, latent ODE, gradient flow, Koopman, GENERIC, or SINDy?",
+    "q3_training_schedule": "Should the dynamics model be trained before the second LoRA stage, jointly with the second LoRA stage, or distilled into LoRA later?",
+    "q4_inference_usage": "Should rollout remain a scoring diagnostic, enter candidate reranking, or inject hidden residuals during decoding?",
+    "q5_downstream_transfer": "Run C2S/downstream transfer only after the core pathway model choice is stable."
   }
 }

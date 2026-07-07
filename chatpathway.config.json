@@ -1,0 +1,44 @@
+{
+  "active_profile": "autodl",
+  "profiles": {
+    "autodl": {
+      "asset_root": "/root/autodl-tmp",
+      "repo_dir": "ChatPathway2",
+      "models_dir": "models",
+      "data_dir": "data",
+      "checkpoints_dir": "checkpoints",
+      "runs_dir": "runs",
+      "artifacts_dir": "artifacts",
+      "training_logs_dir": "runs/training_logs",
+      "experiment_logs_dir": "runs/experiment_logs",
+      "experiment_plans_dir": "runs/experiment_plans",
+      "downstream_runs_dir": "runs/downstream"
+    },
+    "cfff": {
+      "asset_root": "/data/chatpathway",
+      "repo_dir": "ChatPathway2",
+      "models_dir": "models",
+      "data_dir": "data",
+      "checkpoints_dir": "checkpoints",
+      "runs_dir": "runs",
+      "artifacts_dir": "artifacts",
+      "training_logs_dir": "runs/training_logs",
+      "experiment_logs_dir": "runs/experiment_logs",
+      "experiment_plans_dir": "runs/experiment_plans",
+      "downstream_runs_dir": "runs/downstream"
+    },
+    "local": {
+      "asset_root": ".runtime",
+      "repo_dir": ".",
+      "models_dir": "models",
+      "data_dir": "data",
+      "checkpoints_dir": "checkpoints",
+      "runs_dir": "runs",
+      "artifacts_dir": "artifacts",
+      "training_logs_dir": "runs/training_logs",
+      "experiment_logs_dir": "runs/experiment_logs",
+      "experiment_plans_dir": "runs/experiment_plans",
+      "downstream_runs_dir": "runs/downstream"
+    }
+  }
+}

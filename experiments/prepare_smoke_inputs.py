@@ -10,16 +10,18 @@ import argparse
 import csv
 from pathlib import Path
 
+from experiments.runtime_config import asset_path
 
-DEFAULT_PATHWAY_TRAIN = "/root/autodl-tmp/data/train_11_species_dataset.csv"
-DEFAULT_PATHWAY_TEST = "/root/autodl-tmp/data/test_7_species_dataset.csv"
-DEFAULT_PATHWAY_TRAIN_SMOKE = "/root/autodl-tmp/data/train_11_species_dataset_smoke.csv"
-DEFAULT_PATHWAY_TEST_SMOKE = "/root/autodl-tmp/data/test_7_species_dataset_smoke.csv"
 
-DEFAULT_C2S_TRAIN = "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl"
-DEFAULT_C2S_TEST = "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
-DEFAULT_C2S_TRAIN_SMOKE = "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent_smoke.jsonl"
-DEFAULT_C2S_TEST_SMOKE = "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent_smoke.jsonl"
+DEFAULT_PATHWAY_TRAIN = "data/train_11_species_dataset.csv"
+DEFAULT_PATHWAY_TEST = "data/test_7_species_dataset.csv"
+DEFAULT_PATHWAY_TRAIN_SMOKE = "data/train_11_species_dataset_smoke.csv"
+DEFAULT_PATHWAY_TEST_SMOKE = "data/test_7_species_dataset_smoke.csv"
+
+DEFAULT_C2S_TRAIN = "data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl"
+DEFAULT_C2S_TEST = "data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
+DEFAULT_C2S_TRAIN_SMOKE = "data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent_smoke.jsonl"
+DEFAULT_C2S_TEST_SMOKE = "data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent_smoke.jsonl"
 
 
 def ensure_writable(path: Path, overwrite: bool) -> None:
@@ -60,17 +62,17 @@ def copy_jsonl_head(source: Path, target: Path, rows: int, overwrite: bool) -> i
 
 
 def maybe_copy(kind: str, source: str, target: str, rows: int, overwrite: bool, skip_missing: bool) -> dict:
-    source_path = Path(source)
-    target_path = Path(target)
+    source_path = Path(asset_path(source))
+    target_path = Path(asset_path(target))
     if not source_path.exists():
         if skip_missing:
-            return {"kind": kind, "source": source, "target": target, "rows": 0, "status": "missing_source_skipped"}
+            return {"kind": kind, "source": str(source_path), "target": str(target_path), "rows": 0, "status": "missing_source_skipped"}
         raise FileNotFoundError(f"Missing source for {kind}: {source_path}")
     if kind.endswith("csv"):
         count = copy_csv_head(source_path, target_path, rows, overwrite)
     else:
         count = copy_jsonl_head(source_path, target_path, rows, overwrite)
-    return {"kind": kind, "source": source, "target": target, "rows": count, "status": "ok"}
+    return {"kind": kind, "source": str(source_path), "target": str(target_path), "rows": count, "status": "ok"}
 
 
 def parse_args() -> argparse.Namespace:

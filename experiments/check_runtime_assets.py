@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from experiments.runtime_config import asset_root as configured_asset_root
+
 
 MATRIX_PATH = Path(__file__).with_name("matrix.json")
 RUNTIME_MANIFEST_PATH = Path(__file__).with_name("runtime_manifest.json")
@@ -400,9 +402,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase", choices=("train", "infer", "both"), default="both")
     parser.add_argument(
         "--asset-root",
-        default=os.environ.get("CHATPATHWAY_ASSET_ROOT"),
-        help="Override manifest asset_root for local mirrors of /root/autodl-tmp.",
+        help="Temporarily override the asset root from chatpathway.config.json.",
     )
+    parser.add_argument("--profile", help="Runtime profile name from chatpathway.config.json.")
     parser.add_argument("--check-outputs", action="store_true", help="Also require expected result artifacts to exist.")
     parser.add_argument(
         "--create-output-dirs",
@@ -420,13 +422,14 @@ def main() -> None:
     matrix = load_json(MATRIX_PATH)
     manifest = load_json(RUNTIME_MANIFEST_PATH)
     ids = select_ids(implemented_ids(matrix), args.ids)
+    asset_root = args.asset_root or str(configured_asset_root(args.profile))
     records = check_rows(
         ids=ids,
         phase=args.phase,
         manifest=manifest,
         check_outputs=args.check_outputs,
         create_output_dirs=args.create_output_dirs,
-        asset_root=args.asset_root,
+        asset_root=asset_root,
     )
     if args.jsonl:
         write_jsonl(args.jsonl, records)

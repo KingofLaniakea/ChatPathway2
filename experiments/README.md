@@ -8,8 +8,10 @@ The source of truth is `matrix.json`; runtime requirements are in
 `EXPERIMENT_MATRIX.csv`; and the shared-stage graph is documented in
 `TRAINING_MATRIX.md`.
 
-Runtime assets are resolved under `CHATPATHWAY_ASSET_ROOT`. When the environment
-variable is unset, wrappers default to `/root/autodl-tmp`.
+Runtime assets are resolved from the repository-root `chatpathway.config.json`.
+The default active profile is `autodl`, which maps assets to `/root/autodl-tmp`.
+For a new server, edit `active_profile` or that profile's `asset_root` in the
+config file; wrapper defaults will follow it automatically.
 
 ## Commands
 
@@ -28,14 +30,14 @@ python -m experiments.run_experiment axes
 Show runtime requirements and expected outputs for one row:
 
 ```bash
-python -m experiments.run_experiment runtime b01_latent_neural_ode_teacher_rollout
+python -m experiments.run_experiment runtime b02_latent_neural_ode_teacher_rollout
 ```
 
 Check required runtime assets before launching training or inference:
 
 ```bash
-python -m experiments.run_experiment check-assets --phase train --ids a02_frameworka_hnn_regularized_lora --strict
-python -m experiments.run_experiment check-assets --phase infer --ids a02_frameworka_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase train --ids b00_frameworka_force_damped_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase infer --ids b00_frameworka_force_damped_hnn_regularized_lora --strict
 ```
 
 `runtime_manifest.json` separates `train_requires`, `infer_requires`, and
@@ -43,22 +45,24 @@ python -m experiments.run_experiment check-assets --phase infer --ids a02_framew
 trained adapter, but it does not load training-only files such as `hnn_func.pt`
 or `dynamics_func.pt`.
 
-For a new server or local mirror, override the asset root used by wrappers and asset checks:
+For a new server or local mirror, switch the configured profile or use a
+temporary check-only override:
 
 ```bash
-CHATPATHWAY_ASSET_ROOT=/data/chatpathway python -m experiments.run_experiment check-assets --phase both
+python -m experiments.run_experiment check-assets --profile cfff --phase both
+python -m experiments.run_experiment check-assets --asset-root /data/chatpathway --phase both
 ```
 
 Dry-run one training command:
 
 ```bash
-python -m experiments.run_experiment train a03_frameworka_phnn_prompt_regularized_lora --dry-run
+python -m experiments.run_experiment train b01_frameworka_phnn_prompt_regularized_lora --dry-run
 ```
 
 Run one inference command and pass extra args after `--`:
 
 ```bash
-python -m experiments.run_experiment infer a02_frameworka_hnn_regularized_lora -- --adapter /path/to/adapter --overwrite
+python -m experiments.run_experiment infer b00_frameworka_force_damped_hnn_regularized_lora -- --adapter /path/to/adapter --overwrite
 ```
 
 Dry-run all implemented inference commands:
@@ -88,7 +92,7 @@ python -m experiments.run_experiment plan --phase infer --format jsonl --contain
 Run a subset and append execution status records:
 
 ```bash
-python -m experiments.run_experiment run-all --phase train --start-at b01_latent_neural_ode_teacher_rollout --stop-after b05_latent_sindy_teacher_rollout --log-jsonl runs/experiment_logs/train_teachers.jsonl
+python -m experiments.run_experiment run-all --phase train --start-at b02_latent_neural_ode_teacher_rollout --stop-after b06_latent_sindy_teacher_rollout --log-jsonl runs/experiment_logs/train_teachers.jsonl
 ```
 
 Validate that every implemented matrix row has concrete train/infer modules:
@@ -147,23 +151,23 @@ The runnable rows are defined in `experiments/matrix.json`:
 
 | ID | Layer | Training wrapper | Inference wrapper |
 | --- | --- | --- | --- |
-| `a00_sft_lora_direct` | adapter/direct-generation training | `experiments/methods/a00_sft_lora_direct/train.py` | `experiments/methods/a00_sft_lora_direct/infer.py` |
-| `a01_sft_lora_ddp_direct` | adapter/direct-generation training | `experiments/methods/a01_sft_lora_ddp_direct/train.py` | `experiments/methods/a01_sft_lora_ddp_direct/infer.py` |
-| `a02_frameworka_hnn_regularized_lora` | adapter/direct-generation training | `experiments/methods/a02_frameworka_hnn_regularized_lora/train.py` | `experiments/methods/a02_frameworka_hnn_regularized_lora/infer.py` |
-| `a03_frameworka_phnn_prompt_regularized_lora` | adapter/direct-generation training | `experiments/methods/a03_frameworka_phnn_prompt_regularized_lora/train.py` | `experiments/methods/a03_frameworka_phnn_prompt_regularized_lora/infer.py` |
-| `b00_lejepa_pathway_sentence` | shared representation and latent-dynamics teachers | `experiments/methods/b00_lejepa_pathway_sentence/train.py` | `experiments/methods/b00_lejepa_pathway_sentence/infer.py` |
-| `b01_latent_neural_ode_teacher_rollout` | shared representation and latent-dynamics teachers | `experiments/methods/b01_latent_neural_ode_teacher_rollout/train.py` | `experiments/methods/b01_latent_neural_ode_teacher_rollout/infer.py` |
-| `b02_latent_gradient_flow_teacher_rollout` | shared representation and latent-dynamics teachers | `experiments/methods/b02_latent_gradient_flow_teacher_rollout/train.py` | `experiments/methods/b02_latent_gradient_flow_teacher_rollout/infer.py` |
-| `b03_latent_koopman_teacher_rollout` | shared representation and latent-dynamics teachers | `experiments/methods/b03_latent_koopman_teacher_rollout/train.py` | `experiments/methods/b03_latent_koopman_teacher_rollout/infer.py` |
-| `b04_latent_generic_teacher_rollout` | shared representation and latent-dynamics teachers | `experiments/methods/b04_latent_generic_teacher_rollout/train.py` | `experiments/methods/b04_latent_generic_teacher_rollout/infer.py` |
-| `b05_latent_sindy_teacher_rollout` | shared representation and latent-dynamics teachers | `experiments/methods/b05_latent_sindy_teacher_rollout/train.py` | `experiments/methods/b05_latent_sindy_teacher_rollout/infer.py` |
-| `b06_latent_ode_encoder_teacher_rollout` | shared representation and latent-dynamics teachers | `experiments/methods/b06_latent_ode_encoder_teacher_rollout/train.py` | `experiments/methods/b06_latent_ode_encoder_teacher_rollout/infer.py` |
-| `c00_neural_ode_rollout_rerank` | rollout-assisted inference using trained dynamics | `experiments/methods/c00_neural_ode_rollout_rerank/train.py` | `experiments/methods/c00_neural_ode_rollout_rerank/infer.py` |
-| `c01_neural_ode_residual_injection` | rollout-assisted inference using trained dynamics | `experiments/methods/c01_neural_ode_residual_injection/train.py` | `experiments/methods/c01_neural_ode_residual_injection/infer.py` |
-| `d00_neural_ode_distilled_lora_direct` | dynamics-to-LoRA distillation or joint regularization | `experiments/methods/d00_neural_ode_distilled_lora_direct/train.py` | `experiments/methods/d00_neural_ode_distilled_lora_direct/infer.py` |
-| `d01_joint_neural_ode_regularized_lora` | dynamics-to-LoRA distillation or joint regularization | `experiments/methods/d01_joint_neural_ode_regularized_lora/train.py` | `experiments/methods/d01_joint_neural_ode_regularized_lora/infer.py` |
-| `d02_joint_gradient_flow_regularized_lora` | dynamics-to-LoRA distillation or joint regularization | `experiments/methods/d02_joint_gradient_flow_regularized_lora/train.py` | `experiments/methods/d02_joint_gradient_flow_regularized_lora/infer.py` |
-| `e00_c2s_transfer_qwen` | downstream transfer/application | `experiments/methods/e00_c2s_transfer_qwen/train.py` | `experiments/methods/e00_c2s_transfer_qwen/infer.py` |
+| `a00_sft_lora_direct` | SFT and non-dynamics adapter baselines | `experiments/methods/a00_sft_lora_direct/train.py` | `experiments/methods/a00_sft_lora_direct/infer.py` |
+| `a01_sft_lora_ddp_direct` | SFT and non-dynamics adapter baselines | `experiments/methods/a01_sft_lora_ddp_direct/train.py` | `experiments/methods/a01_sft_lora_ddp_direct/infer.py` |
+| `b00_frameworka_force_damped_hnn_regularized_lora` | core latent-space and dynamics model selection | `experiments/methods/b00_frameworka_force_damped_hnn_regularized_lora/train.py` | `experiments/methods/b00_frameworka_force_damped_hnn_regularized_lora/infer.py` |
+| `b01_frameworka_phnn_prompt_regularized_lora` | core latent-space and dynamics model selection | `experiments/methods/b01_frameworka_phnn_prompt_regularized_lora/train.py` | `experiments/methods/b01_frameworka_phnn_prompt_regularized_lora/infer.py` |
+| `b02_latent_neural_ode_teacher_rollout` | core latent-space and dynamics model selection | `experiments/methods/b02_latent_neural_ode_teacher_rollout/train.py` | `experiments/methods/b02_latent_neural_ode_teacher_rollout/infer.py` |
+| `b03_latent_gradient_flow_teacher_rollout` | core latent-space and dynamics model selection | `experiments/methods/b03_latent_gradient_flow_teacher_rollout/train.py` | `experiments/methods/b03_latent_gradient_flow_teacher_rollout/infer.py` |
+| `b04_latent_koopman_teacher_rollout` | core latent-space and dynamics model selection | `experiments/methods/b04_latent_koopman_teacher_rollout/train.py` | `experiments/methods/b04_latent_koopman_teacher_rollout/infer.py` |
+| `b05_latent_generic_teacher_rollout` | core latent-space and dynamics model selection | `experiments/methods/b05_latent_generic_teacher_rollout/train.py` | `experiments/methods/b05_latent_generic_teacher_rollout/infer.py` |
+| `b06_latent_sindy_teacher_rollout` | core latent-space and dynamics model selection | `experiments/methods/b06_latent_sindy_teacher_rollout/train.py` | `experiments/methods/b06_latent_sindy_teacher_rollout/infer.py` |
+| `b07_latent_ode_encoder_teacher_rollout` | core latent-space and dynamics model selection | `experiments/methods/b07_latent_ode_encoder_teacher_rollout/train.py` | `experiments/methods/b07_latent_ode_encoder_teacher_rollout/infer.py` |
+| `c00_neural_ode_rollout_rerank` | dynamics-aware inference after model selection | `experiments/methods/c00_neural_ode_rollout_rerank/train.py` | `experiments/methods/c00_neural_ode_rollout_rerank/infer.py` |
+| `c01_neural_ode_residual_injection` | dynamics-aware inference after model selection | `experiments/methods/c01_neural_ode_residual_injection/train.py` | `experiments/methods/c01_neural_ode_residual_injection/infer.py` |
+| `d00_neural_ode_distilled_lora_direct` | dynamics-to-LoRA training couplings | `experiments/methods/d00_neural_ode_distilled_lora_direct/train.py` | `experiments/methods/d00_neural_ode_distilled_lora_direct/infer.py` |
+| `d01_joint_neural_ode_regularized_lora` | dynamics-to-LoRA training couplings | `experiments/methods/d01_joint_neural_ode_regularized_lora/train.py` | `experiments/methods/d01_joint_neural_ode_regularized_lora/infer.py` |
+| `d02_joint_gradient_flow_regularized_lora` | dynamics-to-LoRA training couplings | `experiments/methods/d02_joint_gradient_flow_regularized_lora/train.py` | `experiments/methods/d02_joint_gradient_flow_regularized_lora/infer.py` |
+| `x00_c2s_transfer_qwen` | optional downstream transfer/application | `experiments/methods/x00_c2s_transfer_qwen/train.py` | `experiments/methods/x00_c2s_transfer_qwen/infer.py` |
+| `z00_lejepa_pathway_sentence` | lowest-priority speculative ideas | `experiments/methods/z00_lejepa_pathway_sentence/train.py` | `experiments/methods/z00_lejepa_pathway_sentence/infer.py` |
 ## Design space
 
 Use `EXPERIMENT_LAYERS.md` for the broader layer-by-layer candidate list. Not

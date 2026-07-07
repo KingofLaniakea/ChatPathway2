@@ -5,36 +5,36 @@ and benchmarking on a new CFFF server.
 
 ## Current GitHub status
 
-The experiment-matrix work is on branch:
+The working branch is direct-pushed to GitHub `main` after local checks. There
+is no PR branch requirement for this solo-development workflow.
 
 ```text
-agent/organize-experiment-matrix
+main
 ```
-
-It is pushed to GitHub and tracked by the draft PR. `main` is not changed until
-the PR is merged.
 
 ## Path convention
 
 Code should use repository-relative paths for source files and
-`CHATPATHWAY_ASSET_ROOT` for runtime assets.
+`chatpathway.config.json` for runtime assets. Each server should set the active
+profile and that profile's `asset_root`; wrappers then construct model, data,
+checkpoint, run, and artifact paths automatically.
 
 Default AutoDL layout:
 
-```bash
-export CHATPATHWAY_ASSET_ROOT=/root/autodl-tmp
+```json
+"active_profile": "autodl"
 ```
 
 New server layout example:
 
-```bash
-export CHATPATHWAY_ASSET_ROOT=/data/chatpathway
+```json
+"active_profile": "cfff"
 ```
 
 The expected runtime tree is:
 
 ```text
-$CHATPATHWAY_ASSET_ROOT/
+<profile asset_root>/
   models/
   data/
   checkpoints/
@@ -50,12 +50,11 @@ adapter and C2S artifacts, to finish Tasks I-VI without retraining.
 Recommended steps:
 
 ```bash
-cd $CHATPATHWAY_ASSET_ROOT/ChatPathway2
+cd /root/autodl-tmp/ChatPathway2
 git fetch origin
-git checkout agent/organize-experiment-matrix
+git checkout main
 git pull --ff-only
-export CHATPATHWAY_ASSET_ROOT=/root/autodl-tmp
-python -m experiments.run_experiment check-assets --phase infer --ids a02_frameworka_hnn_regularized_lora,e00_c2s_transfer_qwen --strict
+python -m experiments.run_experiment check-assets --profile autodl --phase infer --ids b00_frameworka_force_damped_hnn_regularized_lora,x00_c2s_transfer_qwen --strict
 ```
 
 Then run downstream tasks from existing inference outputs and C2S outputs. Do
@@ -83,15 +82,17 @@ One-time setup:
 ```bash
 git clone https://github.com/KingofLaniakea/ChatPathway2.git
 cd ChatPathway2
-git checkout agent/organize-experiment-matrix
-export CHATPATHWAY_ASSET_ROOT=/data/chatpathway
-mkdir -p "$CHATPATHWAY_ASSET_ROOT"/{models,data,checkpoints,runs,artifacts}
+git checkout main
+mkdir -p /data/chatpathway/{models,data,checkpoints,runs,artifacts}
 ```
+
+Then edit `chatpathway.config.json` so `active_profile` is `cfff` and the
+`cfff.asset_root` is `/data/chatpathway`.
 
 Asset preflight:
 
 ```bash
-python -m experiments.run_experiment check-assets --phase both --strict
+python -m experiments.run_experiment check-assets --profile cfff --phase both --strict
 ```
 
 Training order:
@@ -100,12 +101,13 @@ Training order:
 | --- | --- | --- |
 | 1 | `a00` or `a01` | Train/retrain shared SFT LoRA. |
 | 2 | AE training script | Train or copy the shared AE projector. |
-| 3 | `a02`, `a03` | Train HNN/PHNN-regularized direct-generation adapters. |
-| 4 | `b00`-`b06` | Train representation probes and latent dynamics teachers using shared SFT+AE. |
+| 3 | `b00`, `b01` | Train current force/damp HNN control and PHNN candidate under the same layer. |
+| 4 | `b02`-`b07` | Train latent dynamics teachers using shared SFT+AE. |
 | 5 | `c00`, `c01` | Run dynamics-assisted inference using trained teachers. |
 | 6 | `d00`-`d02` | Distill or jointly train dynamics back into LoRA adapters. |
-| 7 | `e00` | Train/evaluate C2S transfer application if Task VI is in scope. |
+| 7 | `x00` | Train/evaluate C2S transfer application if Task VI is in scope. |
 | 8 | downstream Tasks I-VI | Run benchmark metrics against frozen outputs. |
+| 9 | `z00` | Optional speculative LeJEPA probe only after core benchmark work. |
 
 Use command plans before launching long jobs:
 
@@ -114,8 +116,9 @@ python -m experiments.run_experiment plan --phase train --format shell --output 
 python -m experiments.run_experiment plan --phase infer --format shell --output runs/experiment_plans/infer_all.sh
 ```
 
-## Merge policy
+## Sync policy
 
-Use the PR branch for development until the matrix is reviewed. Merge to `main`
-only after the branch passes local checks and either AutoDL downstream smoke
-tests or CFFF runtime preflight.
+This repository is currently a solo-development project. After local structure,
+wrapper, and dry-run checks pass, commit and push directly to `main`. Use
+feature branches only for risky experiments that should not interrupt the main
+runtime workflow.
