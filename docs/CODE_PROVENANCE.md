@@ -8,9 +8,7 @@ project implementation.
 ## Boundary
 
 `ChatPathway2` is the canonical source tree for the current server-backed work.
-`PathwayDynamicsLLM` is not used as a strict implementation source for this
-repository. It may be useful for reading ideas, but runnable ChatPathway2
-experiments must rely on files in this tree.
+
 
 ## Provenance categories
 
@@ -31,7 +29,7 @@ experiments must rely on files in this tree.
 | Legacy method training | `method/training/legacy/joint_sft_hnn_ddp.py` | Migrated from `method/Qwen3_8B_Method_4_1_2_1.py`, imported in `a419f53`, exact rename in `2044df2`. | Historical joint SFT/HNN reference. |
 | Method inference | `method/inference/pathway.py` | Migrated from server `method/inference.py`, then made configurable in commit `ff2a71a` and reorganized in `2044df2`. | Current pathway generation entry point. |
 | Method inference | `method/inference/pathway_batch.py` | Migrated from server `method/inference_batch.py`, imported in `a419f53` and reorganized in `2044df2`. | Historical batch inference variant. |
-| C2S prep/train/eval scripts | `scripts/c2s/**` | Migrated from server scripts in `a419f53` and grouped under `scripts/` in `2044df2`; `scripts/c2s/train/train_c2s_single.py` is maintained in this revision. | Historical and operational C2S workflows; the maintained single-GPU Qwen C2S trainer is used by optional matrix row `x00`. |
+| C2S prep/train/eval scripts | `scripts/c2s/**` | Migrated from server scripts in `a419f53` and grouped under `scripts/` in `2044df2`; `scripts/c2s/train/train_c2s_single.py` is maintained in this revision. | Historical and operational C2S workflows; the maintained single-GPU Qwen C2S trainer is used by optional matrix row `x001_c2s_transfer_after_model_selection`. |
 | Data/model/analysis scripts | `scripts/data/**`, `scripts/model/**`, `scripts/analysis/**`, `scripts/inference/**` | Migrated from the audited server snapshot in `a419f53` and grouped in `2044df2`. | Supporting workflows and exploratory analysis. |
 | SCGEN baseline | `baselines/scgen/main.py` | Migrated from server `SCGEN/main.py` in `a419f53` and reorganized in `2044df2`. | External baseline code, separate from ChatPathway method code. |
 | Downstream common utilities | `downstream/common/**` | Newly authored during the ChatPathway2 downstream setup, then reorganized in `2044df2`. | Shared parser, IO, and sequence-scoring utilities. |
@@ -72,6 +70,8 @@ rows:
   - Averages AE reconstruction metrics over valid batches.
   - Performs a final optimizer step when the last epoch shard is smaller than
     `gradient_accumulation_steps`.
+  - Adds argparse overrides so full experiment wrappers can train AE from
+    scratch instead of relying on hard-coded server paths.
 - `docs/FRAMEWORK_A_BACKPROP.md`
   - Documents the current FrameworkA training graph, loss routing, and inference
     boundary from maintained ChatPathway2 code.
@@ -120,6 +120,8 @@ rows:
     `--limit`, run metadata, loss history, and tail gradient accumulation.
 - `experiments/_launch.py`
   - Adds a `torchrun` launcher helper used by the distributed SFT matrix row.
+  - Adds `run_steps` so a single experiment wrapper can launch SFT, AE, dynamics
+    training, and inference-related training stages in order.
   - Resolves wrapper default model/data/checkpoint paths through
     `chatpathway.config.json`.
   - Adds `CHATPATHWAY_LAUNCH_DRY_RUN=1` support so wrapper defaults can be

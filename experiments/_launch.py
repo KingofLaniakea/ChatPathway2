@@ -29,6 +29,20 @@ def run_module(module: str, default_args: list[str] | None = None) -> None:
     runpy.run_module(module, run_name="__main__")
 
 
+def run_steps(steps: list[tuple[str, list[str]]]) -> None:
+    """Run a sequence of module commands for a full experiment pipeline."""
+
+    dry_run = os.environ.get("CHATPATHWAY_LAUNCH_DRY_RUN") == "1" or "--dry-run" in sys.argv[1:]
+    commands = [[sys.executable, "-m", module, *args] for module, args in steps]
+    if dry_run:
+        for command in commands:
+            print(_command_string(command))
+        return
+    for command in commands:
+        print(_command_string(command))
+        subprocess.run(command, check=True)
+
+
 def run_torchrun_module(module: str, default_args: list[str] | None = None) -> None:
     """Launch a module through ``torch.distributed.run``.
 

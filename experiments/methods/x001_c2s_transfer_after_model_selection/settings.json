@@ -1,0 +1,12 @@
+{
+  "title": "Optional C2S transfer after selecting a pathway model",
+  "a_dynamics": "selected_after_core_benchmark",
+  "b_ae": "not_applicable_to_c2s_runtime",
+  "d_training": "downstream_lora_transfer",
+  "c_inference": "c0_direct_lora_c2s_generation",
+  "status": "optional_downstream",
+  "method_train_entrypoints": [
+    "scripts.c2s.train.train_c2s_single"
+  ],
+  "method_infer_entrypoint": "downstream.tasks.task6_perturbed_cell.generation"
+}

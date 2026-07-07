@@ -116,32 +116,34 @@ scope without the required corpora and labels in `downstream/DATA_REQUIREMENTS.m
 
 ## Experiment matrix flow
 
-Use `experiments/run_experiment.py` when comparing training/inference variants:
+Use `experiments/run_experiment.py` when comparing full training/inference
+combinations. `EXPERIMENT_MATRIX.csv` is organized by layer columns:
+`a_dynamics`, `b_ae`, `d_training_schedule`, and `c_inference`.
 
 ```bash
 python -m experiments.run_experiment list
 python -m experiments.run_experiment axes
-python -m experiments.run_experiment train b01_frameworka_phnn_prompt_regularized_lora --dry-run
+python -m experiments.run_experiment train exp001_hnn_reconae_joint_direct --dry-run
 python -m experiments.run_experiment plan --phase train --format shell --output runs/experiment_plans/train_all.sh
 ```
 
 Each implemented row under `experiments/methods/` has a concrete `train.py` and
-`infer.py`. Broader design candidates are listed in
-`experiments/EXPERIMENT_LAYERS.md` and `experiments/matrix.json` under
-`candidate_axes`; they are not treated as runnable until concrete scripts exist.
-Runtime prerequisites and expected outputs are recorded in
-`experiments/runtime_manifest.json`; inspect one row with:
+`infer.py` plus a `settings.json` recording its abcd layer settings. Planned
+rows are listed in `EXPERIMENT_MATRIX.csv` with
+`status=planned_method_missing`; they are not treated as runnable until method
+code and wrappers exist. Runtime prerequisites and expected outputs are recorded
+in `experiments/runtime_manifest.json`; inspect one row with:
 
 ```bash
-python -m experiments.run_experiment runtime b02_latent_neural_ode_teacher_rollout
+python -m experiments.run_experiment runtime exp001_hnn_reconae_joint_direct
 ```
 
 Before launching server jobs, check that required models, datasets, adapters, AE
 checkpoints, teacher checkpoints, and output parent directories exist:
 
 ```bash
-python -m experiments.run_experiment check-assets --phase train --ids b00_frameworka_force_damped_hnn_regularized_lora --strict
-python -m experiments.run_experiment check-assets --phase infer --ids b00_frameworka_force_damped_hnn_regularized_lora --strict
+python -m experiments.run_experiment check-assets --phase train --ids exp001_hnn_reconae_joint_direct --strict
+python -m experiments.run_experiment check-assets --phase infer --ids exp001_hnn_reconae_joint_direct --strict
 python -m experiments.run_experiment check-assets --phase both --create-output-dirs
 ```
 
@@ -160,7 +162,7 @@ The wrapper supports:
 - `run-all` for selected batches with `--ids`, `--exclude`, `--start-at`,
   `--stop-after`, and `--contains`.
 - Per-row argument passthrough after `--`, for example
-  `python -m experiments.run_experiment train b00_frameworka_force_damped_hnn_regularized_lora -- --epochs 1 --save-dir /tmp/frameworka_test`.
+  `python -m experiments.run_experiment train exp001_hnn_reconae_joint_direct --dry-run`.
 - `plan` for shell, JSONL, or TSV command manifests.
 - `check-assets` for manifest-driven runtime dependency checks.
 - `consistency` for checking that wrapper dry-run commands match
@@ -175,42 +177,24 @@ The wrapper supports:
 - `python -m experiments.run_experiment consistency --phase both --quiet` to
   verify wrapper/manifest path consistency.
 
-The implemented latent-dynamics teacher rows are:
+The current main row is:
 
-- `b02_latent_neural_ode_teacher_rollout`
-- `b03_latent_gradient_flow_teacher_rollout`
-- `b04_latent_koopman_teacher_rollout`
-- `b05_latent_generic_teacher_rollout`
-- `b06_latent_sindy_teacher_rollout`
-- `b07_latent_ode_encoder_teacher_rollout`
+- `exp001_hnn_reconae_joint_direct`
 
-They train from frozen Qwen+LoRA plus frozen AE latent trajectories and infer by
-rollout scoring. They do not generate pathway text directly.
+Its train wrapper calls `method.training.sft`, then `method.training.latent_ae`,
+then `method.training.framework_a`. Its infer wrapper calls
+`method.inference.pathway`, so inference is direct LoRA generation and does not
+load AE/HNN.
 
-The implemented rollout-assisted inference rows are:
+The currently represented inference-layer choices are:
 
-- `c00_neural_ode_rollout_rerank`
-- `c01_neural_ode_residual_injection`
+- `c0_direct_lora`: runnable for `exp000` through `exp005`.
+- `c1_multi_answer_rerank`: partially runnable in
+  `exp010_neuralode_reconae_teacher_rerank_partial`; candidate generation is
+  still missing.
+- `c2_frameworkb_latent_weighted_average`: planned, not implemented.
 
-These use a trained latent dynamics teacher at inference time. They are kept as
-separate prototypes and do not replace `method/inference/pathway.py`.
-
-The implemented staged teacher-to-LoRA row is:
-
-- `d00_neural_ode_distilled_lora_direct`
-
-It uses a trained Neural ODE teacher during training only; inference loads the
-resulting adapter directly.
-
-The implemented distributed and generalized joint-training rows are:
-
-- `a01_sft_lora_ddp_direct`
-- `d01_joint_neural_ode_regularized_lora`
-- `d02_joint_gradient_flow_regularized_lora`
-
-`a01` uses `torch.distributed.run` through the wrapper. `d01` and `d02` jointly
-update LoRA plus the selected middle network, then perform direct LoRA
-generation at inference time.
+The DDP SFT wrapper is intentionally not part of the main comparison matrix.
 
 ## C2S / Task VI flow
 

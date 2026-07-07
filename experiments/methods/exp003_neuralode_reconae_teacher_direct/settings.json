@@ -1,0 +1,15 @@
+{
+  "title": "Neural ODE teacher first, then second LoRA distillation, direct inference",
+  "a_dynamics": "a3_neural_ode_teacher",
+  "b_ae": "b0_reconstruction_ae_frozen_current",
+  "d_training": "d1_train_dynamics_then_second_lora",
+  "c_inference": "c0_direct_lora",
+  "status": "runnable_candidate",
+  "method_train_entrypoints": [
+    "method.training.sft",
+    "method.training.latent_ae",
+    "method.training.latent_dynamics_teacher",
+    "method.training.dynamics_distilled_lora"
+  ],
+  "method_infer_entrypoint": "method.inference.pathway"
+}

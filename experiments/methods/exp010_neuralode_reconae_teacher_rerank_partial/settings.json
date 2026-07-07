@@ -1,0 +1,14 @@
+{
+  "title": "Neural ODE teacher with multi-candidate rerank inference; candidate generation still missing",
+  "a_dynamics": "a3_neural_ode_teacher",
+  "b_ae": "b0_reconstruction_ae_frozen_current",
+  "d_training": "d1_train_dynamics_then_second_lora",
+  "c_inference": "c1_multi_answer_rerank",
+  "status": "partial_runnable_reranker_only",
+  "method_train_entrypoints": [
+    "method.training.sft",
+    "method.training.latent_ae",
+    "method.training.latent_dynamics_teacher"
+  ],
+  "method_infer_entrypoint": "method.inference.rollout_rerank"
+}

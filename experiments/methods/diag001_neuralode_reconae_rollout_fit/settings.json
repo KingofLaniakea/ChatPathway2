@@ -1,0 +1,10 @@
+{
+  "title": "Diagnostic Neural ODE rollout fit with frozen reconstruction AE",
+  "a_dynamics": "a3_neural_ode_teacher",
+  "b_ae": "b0_reconstruction_ae_frozen_current",
+  "d_training_schedule": "diagnostic_teacher_only_no_second_lora",
+  "c_inference": "diagnostic_latent_rollout_scoring_only",
+  "status": "diagnostic_not_core_matrix",
+  "method_train_entrypoints": ["method.training.latent_dynamics_teacher --variant neural_ode"],
+  "method_infer_entrypoint": "method.inference.latent_dynamics_rollout"
+}

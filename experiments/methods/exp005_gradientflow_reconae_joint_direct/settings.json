@@ -1,0 +1,14 @@
+{
+  "title": "Gradient-flow dynamics + reconstruction AE + joint second LoRA + direct inference",
+  "a_dynamics": "a4_gradient_flow_energy",
+  "b_ae": "b0_reconstruction_ae_frozen_current",
+  "d_training": "d2_joint_second_lora_and_dynamics",
+  "c_inference": "c0_direct_lora",
+  "status": "runnable_candidate",
+  "method_train_entrypoints": [
+    "method.training.sft",
+    "method.training.latent_ae",
+    "method.training.joint_lora_dynamics"
+  ],
+  "method_infer_entrypoint": "method.inference.pathway"
+}

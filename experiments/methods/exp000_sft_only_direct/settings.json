@@ -1,0 +1,12 @@
+{
+  "title": "SFT only, direct LoRA inference",
+  "a_dynamics": "none",
+  "b_ae": "none",
+  "d_training": "d0_sft_only",
+  "c_inference": "c0_direct_lora",
+  "status": "runnable",
+  "method_train_entrypoints": [
+    "method.training.sft"
+  ],
+  "method_infer_entrypoint": "method.inference.pathway"
+}

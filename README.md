@@ -28,4 +28,4 @@ and launch/preflight commands live in
 [experiments/EXPERIMENT_MATRIX.csv](experiments/EXPERIMENT_MATRIX.csv) and a
 diagram at [experiments/TRAINING_MATRIX.md](experiments/TRAINING_MATRIX.md).
 Server handoff and new-server setup are tracked in
-[docs/SERVER_DEVELOPMENT_PLAN.md](docs/SERVER_DEVELOPMENT_PLAN.md).
+[docs/服务器任务安排.md](docs/服务器任务安排.md).

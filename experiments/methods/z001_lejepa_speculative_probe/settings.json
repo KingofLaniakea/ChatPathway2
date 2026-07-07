@@ -1,0 +1,12 @@
+{
+  "title": "Speculative LeJEPA-style latent probe, lowest priority",
+  "a_dynamics": "not_a_dynamics_model",
+  "b_ae": "not_core_ae_experiment",
+  "d_training": "representation_probe_only",
+  "c_inference": "non_generative_latent_scoring",
+  "status": "lowest_priority_speculative",
+  "method_train_entrypoints": [
+    "method.training.lejepa_pathway"
+  ],
+  "method_infer_entrypoint": "method.inference.lejepa_pathway"
+}

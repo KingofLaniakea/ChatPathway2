@@ -1,108 +1,53 @@
-# Experiment layers
+# Experiment Layers
 
-This file separates the experimental design space from the currently runnable
-matrix in `experiments/matrix.json`.
+This file defines the experimental layers used by
+`experiments/EXPERIMENT_MATRIX.csv`.
 
-## Layer 1: backbone and adapter training
+## a: Dynamics Model
 
-Worth testing:
-
-| Item | Question |
+| Code | Meaning |
 | --- | --- |
-| SFT LoRA only | How strong is direct pathway instruction tuning without dynamics? |
-| staged SFT -> dynamics -> LoRA | Does a dynamics teacher improve the adapter after plain SFT? |
-| joint LoRA + dynamics | Does updating LoRA and the dynamics network together help or destabilize training? |
-| dynamics-only teacher | Can the middle network fit latent trajectories when LoRA is frozen? |
-| distributed training | Does larger batch / longer sequence stabilize hidden-trajectory losses? |
+| `a0_none` | No latent dynamics. |
+| `a1_force_damped_hnn_current_control` | Current temporal forced/damped HNN-style module. |
+| `a2_phnn_prompt_control` | Prompt-controlled PHNN. |
+| `a3_neural_ode_teacher` | Controlled Neural ODE teacher. |
+| `a4_gradient_flow_energy` | Dissipative energy / gradient-flow model. |
 
-## Layer 2: latent granularity
+## b: AE / Latent Space
 
-Worth testing:
-
-| Item | Meaning |
+| Code | Meaning |
 | --- | --- |
-| token-level | Hidden velocity between answer tokens. |
-| step-level | Pathway step continuation as the time unit. |
-| sentence-level | Whole question or answer sentence latent. |
-| pathway-level | One latent per pathway trajectory. |
-| masked-span JEPA | Predict held-out pathway spans in latent space. |
+| `none` | No AE bridge. |
+| `b0_reconstruction_ae_frozen_current` | Current 4096 -> 128 -> 4096 reconstruction/cosine AE, frozen later. |
+| `b1_dynamics_aware_ae_pretrain` | Planned AE trained with trajectory/velocity/rollout-aware objective. |
+| `b2_joint_ae_and_dynamics` | Planned AE and dynamics jointly trained. |
 
-## Layer 3: middle network families
+## d: Training Schedule
 
-Worth testing:
-
-| Item | Formula / role |
+| Code | Meaning |
 | --- | --- |
-| none | Baseline direct LoRA. |
-| AE only | Learn hidden-to-latent bridge without dynamics. |
-| Neural ODE | `dz/dt = f(z,t)` unconstrained vector field. |
-| Latent ODE | Encoder-conditioned initial state plus ODE rollout. |
-| HNN | `dz/dt = J grad H(z)`. |
-| time-dependent HNN | HNN with forcing/damping terms. |
-| PHNN | `dz/dt = (J-R)grad H(z,u,t)+Gu`. |
-| gradient flow | `dz/dt = -R grad E(z,u)`. |
-| GENERIC | reversible plus irreversible dynamics. |
-| Koopman | latent dynamics with approximately linear evolution. |
-| SINDy | sparse symbolic latent vector field. |
-| JEPA | latent prediction without text reconstruction. |
+| `d0_sft_only` | Only SFT LoRA. |
+| `d1_train_dynamics_then_second_lora` | Train dynamics teacher first; then train second LoRA with frozen teacher regularization. |
+| `d2_joint_second_lora_and_dynamics` | Train second LoRA and dynamics module together. |
 
-## Layer 4: objective design
+## c: Inference Mode
 
-Worth testing:
-
-| Item | Meaning |
+| Code | Meaning |
 | --- | --- |
-| CE | Standard answer-token cross entropy. |
-| reconstruction | AE reconstruction of hidden states. |
-| velocity alignment | Match predicted latent/hidden velocity to real hidden velocity. |
-| rollout loss | Multi-step latent rollout matches real latent trajectory. |
-| energy regularization | Constrain Hamiltonian/energy behavior. |
-| dissipation/passivity | PHNN-specific damping and energy balance checks. |
-| JEPA latent prediction | Predict target latent from context latent. |
-| anti-collapse regularization | SIGReg/VICReg-style latent distribution control. |
+| `c0_direct_lora` | Direct Qwen + LoRA generation. This is the current main inference mode. |
+| `c1_multi_answer_rerank` | Generate multiple answers, then rerank using dynamics/trajectory score. |
+| `c2_frameworkb_latent_weighted_average` | FrameworkB: weighted average between HNN rollout and LoRA inference result in latent space. |
 
-## Layer 5: inference mode
+## Current Coverage
 
-Worth testing:
-
-| Item | Meaning |
+| Question | Current row |
 | --- | --- |
-| LoRA-only direct | Dynamics influences generation only through adapter training. |
-| downstream-only scoring | Dynamics/AE used only after generation, such as PCTE. |
-| rollout reranking | Generate candidates, then rerank by dynamics consistency. |
-| rollout residual injection | Use dynamics rollout to perturb hidden states during decoding. |
-| non-generative latent inference | JEPA-style scoring and representation probing. |
+| Plain SFT baseline | `exp000_sft_only_direct` |
+| Current full pipeline | `exp001_hnn_reconae_joint_direct` |
+| Swap HNN for PHNN under same b/d/c | `exp002_phnn_reconae_joint_direct` |
+| Dynamics trained first vs jointly trained | `exp003_neuralode_reconae_teacher_direct` vs `exp004_neuralode_reconae_joint_direct` |
+| Alternative dynamics family | `exp005_gradientflow_reconae_joint_direct` |
+| Rerank inference prototype | `exp010_neuralode_reconae_teacher_rerank_partial` |
 
-## Layer 6: downstream validation
-
-Worth testing:
-
-| Item | Role |
-| --- | --- |
-| Task I/II | NLP/entity consistency. |
-| Task III | Predicted-vs-gold latent trajectory DTW. |
-| Task IV | Step continuation consistency. |
-| Task V | KO/WT causal knowledge interface when labels exist. |
-| Task VI | C2S transfer/application comparison. |
-| latent energy-field task | New task: inspect learned energy/flow landscape. |
-
-## Current implemented coverage
-
-The runnable matrix currently covers:
-
-| Requirement dimension | Implemented rows |
-| --- | --- |
-| SFT-only direct baseline | `a00`, `a01` |
-| Current forced/damped HNN and PHNN dynamics candidates | `b00`, `b01` |
-| Dynamics-only latent teachers | `b02`-`b07` |
-| Rollout-assisted inference | `c00`, `c01` |
-| Staged dynamics teacher -> LoRA distillation | `d00` |
-| Distributed training launcher | `a01` |
-| Generalized joint LoRA + ODE/energy dynamics | `d01`, `d02` |
-| Optional C2S transfer/application | `x00` |
-| Lowest-priority JEPA-style sentence/prompt latent probe | `z00` |
-
-Still-design-only axes include step-level/pathway-level granularity and the
-latent energy-field downstream task. They are listed as worthwhile directions
-but intentionally not marked as implemented rows until concrete train/infer
-entry points exist.
+Rows with `status=planned_method_missing` in the CSV are required design
+experiments but are not falsely marked runnable.

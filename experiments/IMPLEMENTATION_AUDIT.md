@@ -1,48 +1,49 @@
-# Experiment implementation audit
+# Experiment Implementation Audit
 
-This file records the current evidence for the experiment-matrix goal. The
-current local acceptance boundary is code correctness on Mac: structure,
-argument compatibility, wrapper/manifest consistency, syntax, and dry-run
-launch behavior. Full GPU training is a later runtime validation step, not a
-local completion requirement.
+This audit records the local code-completion boundary for the experiment
+wrappers. GPU training on real assets remains a server validation step.
 
-## Requirements
+## Current Evidence
 
-| Requirement | Current evidence | Status |
+| Requirement | Evidence | Status |
 | --- | --- | --- |
-| Enumerate worthwhile layer-level candidates | `experiments/EXPERIMENT_LAYERS.md`; `experiments/matrix.json` `candidate_axes` | Implemented as design inventory |
-| Build an integrated training/inference matrix | `experiments/matrix.json` with 17 implemented rows | Implemented |
-| Every implemented row has a training wrapper | `experiments/methods/<row>/train.py`; checked by `python -m experiments.validate_matrix` | Implemented and structurally verified |
-| Every implemented row has an inference wrapper | `experiments/methods/<row>/infer.py`; checked by `python -m experiments.validate_matrix` | Implemented and structurally verified |
-| Wrapper commands are launchable without importing heavy model dependencies | `python -m experiments.run_experiment audit` | Verified locally |
-| Wrapper commands match manifest paths | `python -m experiments.run_experiment consistency --phase both --quiet` | Verified locally |
-| Wrapper-passed target CLI options and literal choices are declared by target scripts | `experiments/audit_matrix_consistency.py` parses target `argparse.add_argument` calls | Verified locally |
-| Runtime assets are checkable before server runs | `experiments/check_runtime_assets.py`; `python -m experiments.run_experiment check-assets ...` | Implemented; strict success is a runtime-only server check |
-| Smoke inputs are reproducible | `experiments/prepare_smoke_inputs.py`; `python -m experiments.run_experiment prepare-smoke ...` | Implemented; real files are created where the source datasets exist |
-| High-level wrapper can launch/list/plan/run batches | `experiments/run_experiment.py` supports `list`, `axes`, `show`, `runtime`, `train`, `infer`, `pipeline`, `run-all`, `plan`, `audit`, `consistency`, `check-assets`, and `prepare-smoke` | Implemented |
-| LeJEPA-style pathway-language probe exists | `method/training/lejepa_pathway.py`, `method/inference/lejepa_pathway.py`, row `z00_lejepa_pathway_sentence` | Implemented structurally |
+| Combination matrix uses abcd layer columns | `experiments/EXPERIMENT_MATRIX.csv`, `experiments/matrix.json` | Implemented |
+| Current training+inference pipeline is represented as one row | `exp001_hnn_reconae_joint_direct` | Implemented |
+| AE is an explicit layer | `b_ae` column and `b0/b1/b2` choices | Implemented in matrix; only `b0` runnable |
+| DDP is not a main comparison | no DDP row in `implemented` | Implemented |
+| FrameworkA naming removed from experiment IDs | main row is `exp001_hnn_reconae_joint_direct` | Implemented |
+| Inference layer has direct/rerank/FrameworkB options | `c0/c1/c2` in matrix | Implemented in design; `c2` planned |
+| Full train wrappers run from scratch | implemented `train.py` wrappers call SFT and later stages in order | Implemented structurally |
+| Runtime paths separated from design matrix | `runtime_manifest.json` | Implemented |
 
-## Implemented Rows
+## Runnable Rows
 
-| Row | Train module | Inference module | Inference role |
-| --- | --- | --- | --- |
-| `a00_sft_lora_direct` | `method.training.sft` | `method.inference.pathway` | Direct LoRA generation |
-| `b00_frameworka_force_damped_hnn_regularized_lora` | `method.training.framework_a` | `method.inference.pathway` | Direct LoRA generation; HNN affects adapter during training |
-| `b01_frameworka_phnn_prompt_regularized_lora` | `method.training.framework_a_phnn` | `method.inference.pathway` | Direct LoRA generation; PHNN prototype affects adapter during training |
-| `z00_lejepa_pathway_sentence` | `method.training.lejepa_pathway` | `method.inference.lejepa_pathway` | Non-generative latent scoring |
-| `x00_c2s_transfer_qwen` | `scripts.c2s.train.train_c2s_single` | `downstream.tasks.task6_perturbed_cell.generation` | C2S generation for Task VI |
-| `b02_latent_neural_ode_teacher_rollout` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b03_latent_gradient_flow_teacher_rollout` | `method.training.latent_dynamics_teacher --variant gradient_flow` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b04_latent_koopman_teacher_rollout` | `method.training.latent_dynamics_teacher --variant koopman` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b05_latent_generic_teacher_rollout` | `method.training.latent_dynamics_teacher --variant generic` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `b06_latent_sindy_teacher_rollout` | `method.training.latent_dynamics_teacher --variant sindy` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `c00_neural_ode_rollout_rerank` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.rollout_rerank` | Rollout-assisted reranking |
-| `c01_neural_ode_residual_injection` | `method.training.latent_dynamics_teacher --variant neural_ode` | `method.inference.rollout_residual_injection` | Rollout-assisted generation prototype |
-| `b07_latent_ode_encoder_teacher_rollout` | `method.training.latent_dynamics_teacher --variant latent_ode` | `method.inference.latent_dynamics_rollout` | Rollout scoring |
-| `d00_neural_ode_distilled_lora_direct` | `method.training.dynamics_distilled_lora` | `method.inference.pathway` | Direct LoRA generation after staged teacher distillation |
-| `a01_sft_lora_ddp_direct` | `torch.distributed.run -m method.training.sft` | `method.inference.pathway` | Direct LoRA generation after DDP SFT |
-| `d01_joint_neural_ode_regularized_lora` | `method.training.joint_lora_dynamics --variant neural_ode` | `method.inference.pathway` | Direct LoRA generation after joint training |
-| `d02_joint_gradient_flow_regularized_lora` | `method.training.joint_lora_dynamics --variant gradient_flow` | `method.inference.pathway` | Direct LoRA generation after joint training |
+| Row | Train chain | Infer chain |
+| --- | --- | --- |
+| `exp000_sft_only_direct` | `method.training.sft` | `method.inference.pathway` |
+| `exp001_hnn_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.framework_a` | `method.inference.pathway` |
+| `exp002_phnn_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.framework_a_phnn` | `method.inference.pathway` |
+| `exp003_neuralode_reconae_teacher_direct` | `method.training.sft -> method.training.latent_ae -> method.training.latent_dynamics_teacher -> method.training.dynamics_distilled_lora` | `method.inference.pathway` |
+| `exp004_neuralode_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.joint_lora_dynamics --variant neural_ode` | `method.inference.pathway` |
+| `exp005_gradientflow_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.joint_lora_dynamics --variant gradient_flow` | `method.inference.pathway` |
+| `exp010_neuralode_reconae_teacher_rerank_partial` | `method.training.sft -> method.training.latent_ae -> method.training.latent_dynamics_teacher` | `method.inference.rollout_rerank` |
+| `x001_c2s_transfer_after_model_selection` | `scripts.c2s.train.train_c2s_single` | `downstream.tasks.task6_perturbed_cell.generation` |
+| `z001_lejepa_speculative_probe` | `method.training.lejepa_pathway` | `method.inference.lejepa_pathway` |
+
+`exp010` is intentionally marked partial: the reranker exists, but the
+multi-answer candidate generation step required by `c1_multi_answer_rerank` is
+not implemented yet.
+
+## Planned Rows
+
+| Row | Missing implementation |
+| --- | --- |
+| `plan001_hnn_reconae_teacher_direct` | standalone HNN teacher training plus distillation |
+| `plan002_phnn_reconae_teacher_direct` | standalone PHNN teacher training plus distillation |
+| `plan003_hnn_dynamicsawareae_joint_direct` | dynamics-aware AE objective |
+| `plan004_hnn_jointae_joint_direct` | joint AE+dynamics training |
+| `plan005_hnn_reconae_joint_rerank` | multi-answer generation and HNN-compatible rerank |
+| `plan006_hnn_reconae_joint_frameworkb` | FrameworkB latent weighted-average inference |
 
 ## Local Verification
 
@@ -50,44 +51,14 @@ Run from repository root:
 
 ```bash
 python -m experiments.validate_matrix
-python -m experiments.run_experiment audit
+python -m experiments.run_experiment audit --phase both --quiet
 python -m experiments.run_experiment consistency --phase both --quiet
-python -m experiments.run_experiment prepare-smoke --rows 2 --skip-missing
 python -m experiments.run_experiment run-all --phase train --dry-run
 python -m experiments.run_experiment run-all --phase infer --dry-run
-python -m compileall -q method experiments downstream scripts baselines
-python -m downstream.tests.smoke_test
+python -m compileall -q method experiments
 git diff --check
 ```
 
-These checks prove the local code-completion boundary: structure, command
-expansion, wrapper/manifest consistency, target argparse compatibility, syntax,
-and downstream metric smoke behavior. They intentionally do not prove that Qwen,
-PEFT, torchdiffeq, GPU memory, or the real datasets are valid on a server.
-
-## Optional AutoDL Runtime Gates
-
-These are useful before spending GPU time, but they are not required for the Mac
-local code-correctness acceptance boundary. Run from the server checkout, for
-example `/root/autodl-tmp/ChatPathway2` with `chatpathway.config.json` set to
-the `autodl` profile:
-
-```bash
-python -m experiments.run_experiment check-assets --profile autodl --phase both --strict
-python -m experiments.run_experiment check-assets --profile autodl --phase both --create-output-dirs
-python -m experiments.run_experiment consistency --phase both --quiet
-python -m experiments.run_experiment prepare-smoke --rows 2 --overwrite
-```
-
-Then run a small smoke subset before full experiments:
-
-```bash
-python -m experiments.run_experiment train a00_sft_lora_direct -- --train /root/autodl-tmp/data/train_11_species_dataset_smoke.csv --epochs 1 --save-dir /root/autodl-tmp/checkpoints/smoke/qwen3_8b_sft
-python -m experiments.run_experiment infer a00_sft_lora_direct -- --adapter /root/autodl-tmp/checkpoints/smoke/qwen3_8b_sft/checkpoint_epoch_1 --input /root/autodl-tmp/data/test_7_species_dataset_smoke.csv --output /root/autodl-tmp/runs/smoke/sft_epoch1.csv --max-new-tokens 32 --overwrite
-python -m experiments.run_experiment train b02_latent_neural_ode_teacher_rollout -- --train /root/autodl-tmp/data/train_11_species_dataset_smoke.csv --epochs 1 --save-dir /root/autodl-tmp/checkpoints/smoke/latent_dynamics_teachers
-python -m experiments.run_experiment infer b02_latent_neural_ode_teacher_rollout -- --checkpoint /root/autodl-tmp/checkpoints/smoke/latent_dynamics_teachers/neural_ode/neural_ode_epoch_1.pt --input /root/autodl-tmp/data/test_7_species_dataset_smoke.csv --output /root/autodl-tmp/runs/smoke/neural_ode_scores.jsonl --limit 2 --overwrite
-```
-
-Successful AutoDL runs would validate runtime assets, dependency versions, GPU
-memory, and data availability. They are separate from the local implementation
-audit above.
+These checks validate wrapper structure, path consistency, argparse
+compatibility, and Python syntax. They do not prove GPU memory, model asset
+availability, or real benchmark quality.

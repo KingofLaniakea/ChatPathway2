@@ -1,3 +1,5 @@
+import argparse
+import json
 import os
 import pandas as pd
 import csv
@@ -25,6 +27,45 @@ class Config:
     max_length = 1072
     latent_dim = 128         
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+
+CONFIG_FIELDS = (
+    "base_model_id",
+    "sft_lora_path",
+    "train_path",
+    "save_path",
+    "batch_size",
+    "gradient_accumulation_steps",
+    "lr",
+    "epochs",
+    "max_length",
+    "latent_dim",
+    "device",
+)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train the ChatPathway hidden-state AE projector.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--base-model", dest="base_model_id", default=Config.base_model_id)
+    parser.add_argument("--sft-lora", dest="sft_lora_path", default=Config.sft_lora_path)
+    parser.add_argument("--train", dest="train_path", default=Config.train_path)
+    parser.add_argument("--save-dir", dest="save_path", default=Config.save_path)
+    parser.add_argument("--batch-size", type=int, default=Config.batch_size)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=Config.gradient_accumulation_steps)
+    parser.add_argument("--lr", type=float, default=Config.lr)
+    parser.add_argument("--epochs", type=int, default=Config.epochs)
+    parser.add_argument("--max-length", type=int, default=Config.max_length)
+    parser.add_argument("--latent-dim", type=int, default=Config.latent_dim)
+    parser.add_argument("--device", default=Config.device)
+    args = parser.parse_args()
+    cfg = Config()
+    for key, value in vars(args).items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+def config_to_dict(cfg):
+    return {field: getattr(cfg, field) for field in CONFIG_FIELDS}
 
 # ================= 2. AE =================
 class CascadeProjection(nn.Module):
@@ -124,10 +165,13 @@ def collate_fn(batch):
 
 # ================= 4. Training =================
 def train_ae():
-    cfg = Config()
+    cfg = parse_args()
     device = torch.device(cfg.device)
     
     os.makedirs(cfg.save_path, exist_ok=True)
+    with open(os.path.join(cfg.save_path, "run_config.json"), "w", encoding="utf-8") as handle:
+        json.dump(config_to_dict(cfg), handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
     print(f"[*] Training AE based on SFT model: {cfg.sft_lora_path}")
     print(f"[*] Running on device: {cfg.device}")
 
@@ -224,6 +268,9 @@ def train_ae():
         avg_cos = e_cos / max(valid_batches, 1)
         history["rec_mse"].append(avg_mse)
         history["rec_cos"].append(avg_cos)
+        with open(os.path.join(cfg.save_path, "history.json"), "w", encoding="utf-8") as handle:
+            json.dump(history, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
         
         save_dir = os.path.join(cfg.save_path, f"ae_epoch_{epoch+1}")
         os.makedirs(save_dir, exist_ok=True)
