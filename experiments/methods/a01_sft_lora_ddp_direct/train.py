@@ -1,10 +1,10 @@
-"""Train the SFT LoRA baseline."""
+"""Train the SFT LoRA baseline through torchrun/DDP."""
 
-from experiments._launch import asset_path, run_module
+from experiments._launch import asset_path, run_torchrun_module
 
 
 if __name__ == "__main__":
-    run_module(
+    run_torchrun_module(
         "method.training.sft",
         [
             "--base-model",
@@ -12,6 +12,6 @@ if __name__ == "__main__":
             "--train",
             asset_path("data/train_11_species_dataset.csv"),
             "--save-dir",
-            asset_path("checkpoints/qwen3_8b_sft"),
+            asset_path("checkpoints/qwen3_8b_sft_ddp"),
         ],
     )

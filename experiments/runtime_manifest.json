@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-04",
+  "version": "2026-07-07",
   "asset_root": "/root/autodl-tmp",
   "rows": {
     "a00_sft_lora_direct": {
@@ -27,7 +27,32 @@
       ],
       "runtime_notes": "Plain pathway SFT LoRA baseline; direct generation uses the SFT adapter produced by this row."
     },
-    "a01_frameworka_hnn_regularized_lora": {
+    "a01_sft_lora_ddp_direct": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_11_species_dataset.csv",
+        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/qwen3_8b_sft_ddp/checkpoint_epoch_5"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/qwen3_8b_sft_ddp/checkpoint_epoch_5"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/inference/sft_ddp/test_7_species_sft_ddp_epoch5.csv"
+      ],
+      "runtime_notes": "Distributed SFT baseline launched through torchrun."
+    },
+    "a02_frameworka_hnn_regularized_lora": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -57,7 +82,7 @@
       ],
       "runtime_notes": "FrameworkA joint LoRA + HNN-style regularization; direct inference uses the LoRA adapter only."
     },
-    "a02_frameworka_phnn_prompt_regularized_lora": {
+    "a03_frameworka_phnn_prompt_regularized_lora": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -87,7 +112,7 @@
       ],
       "runtime_notes": "PHNN prompt-control prototype; direct inference uses the trained adapter only."
     },
-    "a03_lejepa_pathway_sentence": {
+    "b00_lejepa_pathway_sentence": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -115,34 +140,7 @@
       ],
       "runtime_notes": "Sentence/prompt-level LeJEPA-style latent prediction probe; non-generative inference."
     },
-    "a04_c2s_transfer_qwen": {
-      "requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/qwen3_8b_pathway_c2s_sft_small_5percent/checkpoint_epoch_5"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/qwen3_8b_pathway_c2s_sft_small_5percent/checkpoint_epoch_5"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/c2s/jurkat_ours_results_epoch5_5percent.jsonl"
-      ],
-      "runtime_notes": "Task VI C2S transfer/application row using the 5 percent small split."
-    },
-    "a05_latent_neural_ode_teacher_rollout": {
+    "b01_latent_neural_ode_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -173,7 +171,7 @@
       ],
       "runtime_notes": "Dynamics-only Neural ODE teacher and rollout scoring."
     },
-    "a06_latent_gradient_flow_teacher_rollout": {
+    "b02_latent_gradient_flow_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -204,7 +202,7 @@
       ],
       "runtime_notes": "Dynamics-only gradient-flow energy teacher and rollout scoring."
     },
-    "a07_latent_koopman_teacher_rollout": {
+    "b03_latent_koopman_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -235,7 +233,7 @@
       ],
       "runtime_notes": "Dynamics-only Koopman teacher and rollout scoring."
     },
-    "a08_latent_generic_teacher_rollout": {
+    "b04_latent_generic_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -266,7 +264,7 @@
       ],
       "runtime_notes": "Dynamics-only GENERIC-style teacher and rollout scoring."
     },
-    "a09_latent_sindy_teacher_rollout": {
+    "b05_latent_sindy_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -297,63 +295,7 @@
       ],
       "runtime_notes": "Dynamics-only sparse SINDy teacher and rollout scoring."
     },
-    "a10_neural_ode_rollout_rerank": {
-      "requires": [
-        "a05_latent_neural_ode_teacher_rollout",
-        "/root/autodl-tmp/runs/inference/frameworka_1/test_7_species_frameworka_1_epoch4.csv"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/runs/inference/frameworka_1/test_7_species_frameworka_1_epoch4.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/latent_dynamics_rerank/neural_ode_reranked_candidates.csv"
-      ],
-      "runtime_notes": "Rollout-assisted inference row; training reuses the Neural ODE teacher."
-    },
-    "a11_neural_ode_residual_injection": {
-      "requires": [
-        "a05_latent_neural_ode_teacher_rollout",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_FrameworkA_1/checkpoint_epoch_4",
-        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/latent_dynamics_injection/neural_ode_residual_generation.csv"
-      ],
-      "runtime_notes": "Rollout-assisted generation row; training reuses the Neural ODE teacher."
-    },
-    "a12_latent_ode_encoder_teacher_rollout": {
+    "b06_latent_ode_encoder_teacher_rollout": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -384,14 +326,70 @@
       ],
       "runtime_notes": "Dynamics-only Latent ODE teacher with prompt-derived initial state."
     },
-    "a13_neural_ode_distilled_lora_direct": {
+    "c00_neural_ode_rollout_rerank": {
       "requires": [
-        "a05_latent_neural_ode_teacher_rollout",
+        "b01_latent_neural_ode_teacher_rollout",
+        "/root/autodl-tmp/runs/inference/frameworka_1/test_7_species_frameworka_1_epoch4.csv"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
+        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
+        "/root/autodl-tmp/runs/inference/frameworka_1/test_7_species_frameworka_1_epoch4.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/latent_dynamics_rerank/neural_ode_reranked_candidates.csv"
+      ],
+      "runtime_notes": "Rollout-assisted inference row; training reuses the Neural ODE teacher."
+    },
+    "c01_neural_ode_residual_injection": {
+      "requires": [
+        "b01_latent_neural_ode_teacher_rollout",
+        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
+        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_FrameworkA_1/checkpoint_epoch_4",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
+        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/latent_dynamics_teachers/neural_ode/neural_ode_epoch_3.pt"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/latent_dynamics_injection/neural_ode_residual_generation.csv"
+      ],
+      "runtime_notes": "Rollout-assisted generation row; training reuses the Neural ODE teacher."
+    },
+    "d00_neural_ode_distilled_lora_direct": {
+      "requires": [
+        "b01_latent_neural_ode_teacher_rollout",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt"
       ],
       "train_requires": [
-        "a05_latent_neural_ode_teacher_rollout",
+        "b01_latent_neural_ode_teacher_rollout",
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
@@ -412,32 +410,7 @@
       ],
       "runtime_notes": "Staged teacher-to-LoRA distillation; direct generation uses only the distilled adapter."
     },
-    "a14_sft_lora_ddp_direct": {
-      "requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/qwen3_8b_sft_ddp/checkpoint_epoch_5"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/qwen3_8b_sft_ddp/checkpoint_epoch_5"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/inference/sft_ddp/test_7_species_sft_ddp_epoch5.csv"
-      ],
-      "runtime_notes": "Distributed SFT baseline launched through torchrun."
-    },
-    "a15_joint_neural_ode_regularized_lora": {
+    "d01_joint_neural_ode_regularized_lora": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -467,7 +440,7 @@
       ],
       "runtime_notes": "Joint LoRA + Neural ODE regularization; direct generation uses the trained adapter."
     },
-    "a16_joint_gradient_flow_regularized_lora": {
+    "d02_joint_gradient_flow_regularized_lora": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
@@ -496,6 +469,57 @@
         "/root/autodl-tmp/runs/inference/joint_lora_dynamics/gradient_flow_epoch3.csv"
       ],
       "runtime_notes": "Joint LoRA + gradient-flow regularization; direct generation uses the trained adapter."
+    },
+    "e00_c2s_transfer_qwen": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
+        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl",
+        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
+        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/qwen3_8b_pathway_c2s_sft_small_5percent/checkpoint_epoch_5"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/qwen3_8b_pathway_c2s_sft_small_5percent/checkpoint_epoch_5"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/c2s/jurkat_ours_results_epoch5_5percent.jsonl"
+      ],
+      "runtime_notes": "Task VI C2S transfer/application row using the 5 percent small split."
     }
+  },
+  "asset_root_env": "CHATPATHWAY_ASSET_ROOT",
+  "storage_plan": {
+    "repo_checkout": "ChatPathway2",
+    "default_asset_root": "/root/autodl-tmp",
+    "override": "Set CHATPATHWAY_ASSET_ROOT on a new server, or pass --asset-root to check-assets.",
+    "subdirs": {
+      "models": "Base LLMs and external baselines.",
+      "data": "Pathway CSVs, KEGG/reference artifacts, and C2S JSONL/H5AD files.",
+      "checkpoints": "LoRA adapters, AE projectors, HNN/PHNN modules, and latent-dynamics teachers.",
+      "runs": "Inference outputs, downstream outputs, logs, and experiment plans.",
+      "artifacts": "Optional exported reports, figures, and benchmark bundles."
+    }
+  },
+  "shared_artifacts": {
+    "base_qwen8b": "models/qwen3_8B",
+    "pathway_train_csv": "data/train_11_species_dataset.csv",
+    "pathway_test_csv": "data/test_7_species_dataset.csv",
+    "legacy_sft_lora": "checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5",
+    "legacy_frameworka_lora": "checkpoints/legacy/qwen3_8b_FrameworkA_1/checkpoint_epoch_4",
+    "legacy_ae_projector": "checkpoints/legacy/qwen3_8b_ae_latent_128_cos/ae_epoch_5/ae_proj.pt",
+    "legacy_stage3_c2s_seed_lora": "checkpoints/legacy/qwen3_8b_stage3_sft_hnn/checkpoint_epoch_5",
+    "c2s_train_small_5percent": "data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl",
+    "c2s_test_small_5percent": "data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
   }
 }
