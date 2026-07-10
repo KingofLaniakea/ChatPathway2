@@ -15,7 +15,7 @@
       "downstream_runs_dir": "runs/downstream"
     },
     "cfff": {
-      "asset_root": "/data/chatpathway",
+      "asset_root": "/cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui",
       "repo_dir": "ChatPathway2",
       "models_dir": "models",
       "data_dir": "data",

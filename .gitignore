@@ -4,6 +4,10 @@ __pycache__/
 
 .DS_Store
 
+.env
+.env.*
+!.env.example
+
 .venv/
 venv/
 env/

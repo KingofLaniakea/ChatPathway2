@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Optional baseline and Cell2Sentence preparation scripts.
+scgen
+cell2sentence

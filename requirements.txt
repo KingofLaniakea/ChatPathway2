@@ -1,0 +1,28 @@
+# Core dependencies for maintained ChatPathway2 training, inference, experiment,
+# and downstream modules. Install a PyTorch build that matches the host CUDA/CPU
+# stack; the CFFF server already provides torch 2.3.0+cu121.
+torch>=2.1
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+tqdm>=4.66
+requests>=2.31
+matplotlib>=3.7
+seaborn>=0.13
+h5py>=3.10
+
+# LLM/LoRA runtime.
+transformers>=4.51.0,<5.0
+peft>=0.15.0,<0.20
+accelerate>=1.6.0,<2.0
+datasets>=2.18.0,<5.0
+huggingface-hub>=0.23.0,<1.0
+safetensors>=0.4.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+
+# Latent dynamics and biological data workflows.
+torchdiffeq>=0.2.3
+anndata>=0.10
+scanpy>=1.10
+cmapPy>=4.0.1
