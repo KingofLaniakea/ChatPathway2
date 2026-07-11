@@ -1,0 +1,21 @@
+"""Train forced/damped HNN regularization using the shared SFT and AE."""
+
+from experiments._launch import asset_path, run_steps, seeded_asset_path
+
+
+if __name__ == "__main__":
+    run_steps([
+        (
+            "method.training.framework_a",
+            [
+                "--variant", "forced_damped_hnn",
+                "--structure-mode", "orthogonal_poisson",
+                "--damping-mode", "isotropic",
+                "--base-model", asset_path("models/qwen3_8B"),
+                "--sft-lora", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best"),
+                "--ae-ckpt", seeded_asset_path("checkpoints/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"),
+                "--train", asset_path("data/train_kegg_pathway_pilot.csv"),
+                "--save-dir", seeded_asset_path("checkpoints/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora"),
+            ],
+        ),
+    ])

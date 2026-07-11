@@ -1,12 +1,12 @@
 {
-  "title": "SFT only, direct LoRA inference",
-  "a_dynamics": "none",
+  "title": "Shared SFT only, direct greedy inference",
+  "a_dynamics": "a0_none",
   "b_ae": "none",
-  "d_training": "d0_sft_only",
+  "d_training_schedule": "d0_stage1_sft",
   "c_inference": "c0_direct_lora",
-  "status": "runnable",
+  "status": "runnable_baseline",
   "method_train_entrypoints": [
-    "method.training.sft"
+    "experiments.artifact_check"
   ],
   "method_infer_entrypoint": "method.inference.pathway"
 }

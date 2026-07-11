@@ -23,9 +23,10 @@ SYMBOL = re.compile(r"\b[A-Z][A-Z0-9\-]{1,14}\b")
 STOP = re.compile(
     r"\s+(?:activates?|inhibits?|binds?|regulates?|phosphorylates?|"
     r"dephosphorylates?|ubiquitinates?|methylates?|acetylates?|degrades?|"
-    r"cleaves?|forms?|produces?|converts?|cataly[sz]es?|induces?|represses?|"
+    r"cleaves?|forms?|produces?|(?:is\s+)?converts?(?:ed)?(?:\s+to)?|cataly[sz]es?|induces?|represses?|"
     r"expresses?|transports?|associates?|dissociates?|causes?|leads?\s+to|"
-    r"results?\s+in|and\s+(?:gene|protein|metabolite|compound|component)|"
+    r"results?\s+in|mediates?(?:\s+a\s+functional\s+link)?|(?:is\s+)?shared(?:\s+in)?|"
+    r"and\s+(?:gene|protein|metabolite|compound|component)|"
     r"or\s+(?:gene|protein|metabolite|compound|component)|via|through|by)\b.*$",
     flags=re.IGNORECASE,
 )

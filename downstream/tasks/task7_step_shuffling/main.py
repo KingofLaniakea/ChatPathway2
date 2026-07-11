@@ -18,25 +18,42 @@ from pathlib import Path
 from typing import Any
 
 from downstream.common.io import load_records, mean, write_json, write_rows
+from downstream.common.pathway_json import (
+    PathwayStepValue,
+    canonical_candidate_json,
+    parse_pathway_payload,
+    record_id,
+)
 from downstream.common.sequence_scoring import conditional_score, load_model
 
 
-def step_lines(text: str) -> list[str]:
-    return [line.strip() for line in str(text or "").splitlines() if line.strip()]
+def step_values(value: Any) -> list[PathwayStepValue]:
+    return list(parse_pathway_payload(value).steps)
 
 
-def shuffled_candidates(lines: list[str], count: int, rng: random.Random) -> list[str]:
-    if len(lines) < 3:
+def shuffled_candidates(
+    steps: list[PathwayStepValue] | list[str],
+    count: int,
+    rng: random.Random,
+) -> list[str]:
+    normalized = [
+        step
+        if isinstance(step, PathwayStepValue)
+        else PathwayStepValue(index, None, "", str(step))
+        for index, step in enumerate(steps)
+    ]
+    if len(normalized) < 3:
         return []
-    results, seen = [], {tuple(lines)}
+    results: list[str] = []
+    seen = {tuple(step.text for step in normalized)}
     attempts = 0
     while len(results) < count and attempts < count * 30:
-        proposal = lines[:]
+        proposal = normalized[:]
         rng.shuffle(proposal)
-        key = tuple(proposal)
+        key = tuple(step.text for step in proposal)
         if key not in seen:
             seen.add(key)
-            results.append("\n".join(proposal))
+            results.append(canonical_candidate_json(proposal))
         attempts += 1
     return results
 
@@ -75,20 +92,30 @@ def main() -> None:
     rng = random.Random(args.seed)
     candidate_rows, metric_rows = [], []
     for index, record in enumerate(load_records(args.input)[: args.limit]):
-        lines = step_lines(record.get(args.answer_column, ""))
-        negatives = shuffled_candidates(lines, args.num_negatives, rng)
+        parsed = parse_pathway_payload(record.get(args.answer_column, ""))
+        steps = list(parsed.steps)
+        negatives = shuffled_candidates(steps, args.num_negatives, rng)
         if not negatives:
             continue
         question = str(record.get(args.question_column, ""))
-        candidates = [{"label": "gold", "text": "\n".join(lines)}] + [{"label": "shuffled", "text": text} for text in negatives]
+        candidates = [{"label": "gold", "text": canonical_candidate_json(steps)}] + [
+            {"label": "shuffled", "text": text} for text in negatives
+        ]
+        sample_id = record_id(record, index)
         for candidate_index, candidate in enumerate(candidates):
-            row = {"sample_id": record.get("id", record.get("entry_id", index)), "candidate_index": candidate_index, **candidate}
+            row = {
+                "sample_id": sample_id,
+                "record_id": record.get("record_id", ""),
+                "source_json": record.get("source_json", ""),
+                "candidate_index": candidate_index,
+                **candidate,
+            }
             if model is not None:
                 row["score"] = conditional_score(tokenizer, model, device, question, candidate["text"], args.max_length)
             candidate_rows.append(row)
         if model is not None:
             scored = candidate_rows[-len(candidates):]
-            metric_rows.append({"sample_id": record.get("id", record.get("entry_id", index)), **rank_summary(scored)})
+            metric_rows.append({"sample_id": sample_id, **rank_summary(scored)})
     output_dir = Path(args.output_dir)
     write_rows(output_dir / "candidates.csv", candidate_rows)
     write_rows(output_dir / "sample_metrics.csv", metric_rows)
@@ -96,6 +123,7 @@ def main() -> None:
         "num_eligible_examples": len({row["sample_id"] for row in candidate_rows}),
         "scored": model is not None,
         "seed": args.seed,
+        "candidate_contract": "remaining_steps JSON with original layer/order metadata removed and positions renumbered",
         "metrics": {key: mean([float(row[key]) for row in metric_rows]) for key in ("hit_at_1", "mrr", "shuffle_rejection_rate", "mean_score_margin")} if metric_rows else {},
         "warning": "Review candidate boundaries and use held-out pathways before reporting robustness results.",
     }

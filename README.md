@@ -1,31 +1,42 @@
 # ChatPathway2
 
-ChatPathway2 is the canonical source repository for server-backed development.
-Large assets remain outside Git under `/root/autodl-tmp`.
+ChatPathway2 is the maintained pathway-generation and latent-dynamics
+experiment repository. Large assets remain outside Git under the selected
+runtime profile.
+
+The current controlled benchmark is:
 
 ```text
-method/       pathway model training and inference
-experiments/  high-level experiment matrix and launch wrappers
-downstream/   hypothesis-testing tasks and metrics
-scripts/      historical operational workflows grouped by purpose
-baselines/    non-ChatPathway baselines
-docs/         provenance and server-layout documentation
+Qwen3-8B
+  -> shared stage-1 SFT
+  -> shared 4096-128-4096 reconstruction AE
+  -> compute-matched stage-2 SFT-only control
+     OR stage-2 SFT + HNN
+     OR stage-2 SFT + (J-rI) grad H + F(t)
+  -> direct greedy JSON generation
 ```
 
-Start with [docs/WORKFLOW.md](docs/WORKFLOW.md) for the current training,
-inference, and downstream order. Use [method/README.md](method/README.md) for
-pathway generation and [downstream/README.md](downstream/README.md) for
-hypothesis testing. The canonical server asset layout is documented in
-[docs/SERVER_LAYOUT.md](docs/SERVER_LAYOUT.md), and code origin is tracked in
-[docs/CODE_PROVENANCE.md](docs/CODE_PROVENANCE.md). FrameworkA gradient flow is
-documented in [docs/FRAMEWORK_A_BACKPROP.md](docs/FRAMEWORK_A_BACKPROP.md), and
-the current inference adapter choice is recorded in
-[docs/INFERENCE_BEST_CKPT.md](docs/INFERENCE_BEST_CKPT.md). The experimental
-PHNN training variant is described in
-[docs/PHNN_TRAINING_DESIGN.md](docs/PHNN_TRAINING_DESIGN.md). Experiment rows
-and launch/preflight commands live in
-[experiments/README.md](experiments/README.md), with a CSV matrix at
-[experiments/EXPERIMENT_MATRIX.csv](experiments/EXPERIMENT_MATRIX.csv) and a
-diagram at [experiments/TRAINING_MATRIX.md](experiments/TRAINING_MATRIX.md).
-Server handoff and new-server setup are tracked in
-[docs/服务器任务安排.md](docs/服务器任务安排.md).
+HNN time advances once per ordered graph layer. Atomic `A relation B` spans in
+the same layer form one pooled layer target and are not assigned an invented
+within-layer biological order. Token-level Hamiltonian generation is therefore
+not an active experiment.
+
+Start with:
+
+- [docs/WORKFLOW.md](docs/WORKFLOW.md) for the exact CFFF preparation, smoke,
+  train, inference, and evaluation order;
+- [docs/HAMILTONIAN_EXPERIMENTS.md](docs/HAMILTONIAN_EXPERIMENTS.md) for the
+  equations and scientific boundaries;
+- [experiments/README.md](experiments/README.md) for the five executable matrix
+  rows and three-seed artifact layout;
+- [dataprocess/README.md](dataprocess/README.md) for schema, identity, split,
+  substep, and phenotype policies;
+- [downstream/new_tasks/README.md](downstream/new_tasks/README.md) for the
+  revised Task 0-6 contracts.
+
+PHNN remains deferred until an independently observed port/control variable is
+defined. Neural ODE and semantic-boundary guided inference are not in the first
+Hamiltonian benchmark.
+
+Never commit credentials, environment files, model weights, generated CSVs,
+checkpoints, runs, or downstream artifacts.

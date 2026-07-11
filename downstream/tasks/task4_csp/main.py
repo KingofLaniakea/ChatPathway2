@@ -1,102 +1,133 @@
 #!/usr/bin/env python3
-"""Task IV: Conditional Step Prediction (CSP) evaluation.
+"""Task IV: multi-step Conditional Step Prediction (CSP) evaluation.
 
-It evaluates the *generated continuation* against the gold continuation. The
-input is expected to contain ``answer`` and ``predicted_answer`` columns, as
-produced by the inference script. A step can be JSON, ``entity | relation |
-entity``, or a natural-language ``gene A activates gene B`` sentence.
+The maintained dataset emits one JSON object with ``remaining_steps`` and
+``predicted_phenotype``. Each pathway step can summarize multiple reaction or
+relation events, so evaluation is order-aware at the step object level and
+uses entity/relation-set overlap inside each aligned step. Missing phenotype
+annotations are scored only for required-null compliance, never as biological
+negative labels.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from downstream.common.entities import normalize_entity
+from downstream.common.entities import extract_entities, precision_recall_f1
 from downstream.common.io import load_records, mean, write_json, write_rows
+from downstream.common.pathway_json import (
+    ParsedPathwayPayload,
+    parse_pathway_payload,
+    phenotype_text,
+    record_id,
+)
 
 
 RELATIONS = (
-    "activates", "inhibits", "binds", "regulates", "phosphorylates", "dephosphorylates",
-    "ubiquitinates", "methylates", "acetylates", "degrades", "cleaves", "forms", "produces",
-    "converts", "catalyzes", "induces", "represses", "expresses", "transports", "associates",
+    "mediates a functional link",
+    "is shared in successive reactions",
+    "is converted to",
+    "dephosphorylates",
+    "phosphorylates",
+    "ubiquitinates",
     "dissociates",
+    "associates",
+    "methylates",
+    "acetylates",
+    "transports",
+    "catalyzes",
+    "activates",
+    "inhibits",
+    "regulates",
+    "represses",
+    "expresses",
+    "produces",
+    "converts",
+    "degrades",
+    "induces",
+    "recruits",
+    "cleaves",
+    "forms",
+    "binds",
 )
-RELATION_RE = re.compile(r"\b(" + "|".join(RELATIONS) + r")\b", re.IGNORECASE)
-NATURAL_STEP_RE = re.compile(
-    r"(?:gene|protein|metabolite|compound|component)?\s*([A-Za-z0-9._/\- ]+?)\s+"
-    r"(" + "|".join(RELATIONS) + r")\s+(?:gene|protein|metabolite|compound|component)?\s*"
-    r"([A-Za-z0-9._/\- ]+?)(?:[.;]|$)",
-    re.IGNORECASE,
-)
+RELATION_RE = re.compile(r"\b(" + "|".join(re.escape(value) for value in RELATIONS) + r")\b", re.IGNORECASE)
 
 
-def clean_line(line: str) -> str:
-    return re.sub(r"^\s*(?:step\s*)?\d+\s*[:.)-]\s*", "", line.strip(), flags=re.I)
+def parse_steps(value: Any) -> ParsedPathwayPayload:
+    return parse_pathway_payload(value)
 
 
-def as_step(value: Any) -> tuple[str, str, str] | None:
-    if isinstance(value, dict):
-        left = value.get("reactant") or value.get("source") or value.get("e1")
-        relation = value.get("relation") or value.get("reaction") or value.get("r")
-        right = value.get("product") or value.get("target") or value.get("e2")
-        if left and relation and right:
-            return normalize_entity(str(left)), str(relation).lower().strip(), normalize_entity(str(right))
-        return None
-    line = clean_line(str(value))
-    if "|" in line:
-        parts = [part.strip() for part in line.split("|")]
-        if len(parts) == 3:
-            return normalize_entity(parts[0]), parts[1].lower(), normalize_entity(parts[2])
-    if "->" in line:
-        parts = [part.strip() for part in line.split("->")]
-        if len(parts) == 3:
-            return normalize_entity(parts[0]), parts[1].lower(), normalize_entity(parts[2])
-    matched = NATURAL_STEP_RE.search(line)
-    if matched:
-        return tuple(normalize_entity(part) if index != 1 else part.lower() for index, part in enumerate(matched.groups()))  # type: ignore[return-value]
-    return None
+def normalized_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip().casefold()
 
 
-def parse_steps(text: Any) -> list[tuple[str, str, str] | None]:
-    if isinstance(text, list):
-        return [as_step(item) for item in text]
-    value = str(text or "").strip()
-    if not value:
-        return []
-    try:
-        loaded = json.loads(value)
-        if isinstance(loaded, dict):
-            loaded = loaded.get("steps", loaded.get("pathway", []))
-        if isinstance(loaded, list):
-            return [as_step(item) for item in loaded]
-    except json.JSONDecodeError:
-        pass
-    return [as_step(line) for line in value.splitlines() if clean_line(line)]
+def relation_set(value: str) -> set[str]:
+    return {match.group(1).casefold() for match in RELATION_RE.finditer(value)}
 
 
-def evaluate_pair(target: list[tuple[str, str, str] | None], predicted: list[tuple[str, str, str] | None]) -> dict[str, float | int]:
-    denominator = max(len(target), len(predicted), 1)
-    overlap = min(len(target), len(predicted))
-    exact = reactant = reaction = valid = 0
-    for expected, actual in zip(target, predicted):
-        if actual is not None:
-            valid += 1
-        if expected is None or actual is None:
-            continue
-        if (expected[0], expected[2]) == (actual[0], actual[2]):  # source and target
-            reactant += 1
-        if expected[1] == actual[1]:
-            reaction += 1
-        if expected == actual:
-            exact += 1
+def set_f1(left: set[str], right: set[str]) -> float:
+    return float(precision_recall_f1(left, right)["f1"])
+
+
+def _as_payload(value: Any) -> ParsedPathwayPayload:
+    return value if isinstance(value, ParsedPathwayPayload) else parse_pathway_payload(value)
+
+
+def evaluate_pair(target: Any, predicted: Any) -> dict[str, float | int | str]:
+    target_payload = _as_payload(target)
+    predicted_payload = _as_payload(predicted)
+    target_steps = target_payload.steps
+    predicted_steps = predicted_payload.steps
+    denominator = max(len(target_steps), len(predicted_steps), 1)
+
+    exact = step_index = 0.0
+    entity_f1 = relation_f1 = 0.0
+    for expected, actual in zip(target_steps, predicted_steps):
+        expected_events = expected.substeps or (expected.text,)
+        actual_events = actual.substeps or (actual.text,)
+        exact += float(
+            Counter(normalized_text(value) for value in expected_events)
+            == Counter(normalized_text(value) for value in actual_events)
+        )
+        expected_entities = extract_entities(expected.text)
+        actual_entities = extract_entities(actual.text)
+        entity_f1 += set_f1(actual_entities, expected_entities)
+        relation_f1 += set_f1(relation_set(actual.text), relation_set(expected.text))
+        step_index += float(
+            expected.step is not None
+            and actual.step is not None
+            and expected.step == actual.step
+        )
+
+    target_phenotype = phenotype_text(target_payload.phenotype)
+    predicted_phenotype = phenotype_text(predicted_payload.phenotype)
+    phenotype_available = target_phenotype is not None
+    phenotype_exact = (
+        float(normalized_text(target_phenotype) == normalized_text(predicted_phenotype or ""))
+        if phenotype_available
+        else ""
+    )
+    missing_null_compliance = float(predicted_phenotype is None) if not phenotype_available else ""
+
     return {
-        "target_steps": len(target), "predicted_steps": len(predicted), "paired_steps": overlap,
-        "exact_match": exact / denominator, "reactant_match": reactant / denominator,
-        "reaction_match": reaction / denominator, "parse_validity": valid / max(len(predicted), 1),
+        "target_steps": len(target_steps),
+        "predicted_steps": len(predicted_steps),
+        "paired_steps": min(len(target_steps), len(predicted_steps)),
+        "step_count_accuracy": float(len(target_steps) == len(predicted_steps)),
+        "exact_match": exact / denominator,
+        "reactant_match": entity_f1 / denominator,
+        "reaction_match": relation_f1 / denominator,
+        "step_index_match": step_index / denominator,
+        "json_validity": float(predicted_payload.json_valid),
+        "parse_validity": float(predicted_payload.schema_valid),
+        "phenotype_target_available": int(phenotype_available),
+        "phenotype_exact_available": phenotype_exact,
+        "missing_phenotype_null_compliance": missing_null_compliance,
+        "prediction_parse_error": predicted_payload.error,
     }
 
 
@@ -107,15 +138,45 @@ def main() -> None:
     parser.add_argument("--target-column", default="answer")
     parser.add_argument("--predicted-column", default="predicted_answer")
     args = parser.parse_args()
+
     rows = []
     for index, record in enumerate(load_records(args.input)):
-        row = {"id": record.get("id", record.get("entry_id", index))}
-        row.update(evaluate_pair(parse_steps(record.get(args.target_column)), parse_steps(record.get(args.predicted_column))))
+        row = {
+            "id": record_id(record, index),
+            "record_id": record.get("record_id", ""),
+            "source_json": record.get("source_json", ""),
+        }
+        row.update(evaluate_pair(record.get(args.target_column), record.get(args.predicted_column)))
         rows.append(row)
-    summary = {"num_records": len(rows), "metrics": {
-        key: mean([float(row[key]) for row in rows])
-        for key in ("exact_match", "reactant_match", "reaction_match", "parse_validity")
-    }}
+
+    available_phenotype = [row for row in rows if row["phenotype_target_available"]]
+    missing_phenotype = [row for row in rows if not row["phenotype_target_available"]]
+    summary = {
+        "num_records": len(rows),
+        "phenotype_available_records": len(available_phenotype),
+        "phenotype_missing_records": len(missing_phenotype),
+        "metrics": {
+            key: mean([float(row[key]) for row in rows])
+            for key in (
+                "step_count_accuracy",
+                "exact_match",
+                "reactant_match",
+                "reaction_match",
+                "step_index_match",
+                "json_validity",
+                "parse_validity",
+            )
+        },
+        "phenotype_metrics": {
+            "exact_when_available": mean(
+                [float(row["phenotype_exact_available"]) for row in available_phenotype]
+            ),
+            "null_compliance_when_unannotated": mean(
+                [float(row["missing_phenotype_null_compliance"]) for row in missing_phenotype]
+            ),
+            "warning": "Null compliance for unannotated examples is a format metric, not phenotype accuracy.",
+        },
+    }
     output_dir = Path(args.output_dir)
     write_rows(output_dir / "sample_metrics.csv", rows)
     write_json(output_dir / "summary_metrics.json", summary)

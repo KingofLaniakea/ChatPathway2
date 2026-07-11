@@ -1,9 +1,10 @@
-"""Run the full training pipeline for this experiment."""
+"""Verify the shared SFT checkpoint used by the direct baseline."""
 
-from experiments._launch import asset_path, run_steps
+from experiments._launch import run_module, seeded_asset_path
 
 
 if __name__ == "__main__":
-    run_steps([
-        ('method.training.sft', ['--base-model', asset_path('models/qwen3_8B'), '--train', asset_path('data/train_11_species_dataset.csv'), '--save-dir', asset_path('checkpoints/experiments/exp000_sft_only_direct/sft')]),
-    ])
+    run_module(
+        "experiments.artifact_check",
+        ["--path", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best")],
+    )

@@ -19,6 +19,12 @@ from typing import Any
 
 from downstream.common.entities import extract_entities, load_synonyms, precision_recall_f1
 from downstream.common.io import load_records, mean, write_json, write_rows
+from downstream.common.pathway_json import parse_pathway_payload, record_id
+
+
+def pathway_step_text(value: Any) -> str:
+    parsed = parse_pathway_payload(value)
+    return parsed.step_text or str(value or "")
 
 
 def pathway_name(record: dict[str, Any], column: str) -> str:
@@ -94,8 +100,8 @@ def evaluate(records: list[dict[str, Any]], reference: dict[str, set[str]], *, p
     reference_names = list(reference)
     rows: list[dict[str, Any]] = []
     for index, record in enumerate(records):
-        predicted = extract_entities(str(record.get(predicted_column, "")), synonyms)
-        target = extract_entities(str(record.get(target_column, "")), synonyms)
+        predicted = extract_entities(pathway_step_text(record.get(predicted_column, "")), synonyms)
+        target = extract_entities(pathway_step_text(record.get(target_column, "")), synonyms)
         metrics = precision_recall_f1(predicted, target)
         truth = pathway_name(record, pathway_column)
         pvalues = [hypergeom_sf(len(predicted & reference[name]), len(predicted), len(reference[name]), len(universe))
@@ -107,7 +113,7 @@ def evaluate(records: list[dict[str, Any]], reference: dict[str, set[str]], *, p
         )
         rank = next((rank for rank, (name, _, _) in enumerate(ranked, 1) if name == truth), None)
         row = {
-            "id": record.get("id", record.get("entry_id", index)),
+            "id": record_id(record, index),
             "true_pathway": truth,
             "predicted_pathway": ranked[0][0] if ranked else "",
             "rank_true": rank or "",
@@ -153,7 +159,7 @@ def main() -> None:
         reference = defaultdict(set)
         for record in records:
             reference[pathway_name(record, args.pathway_column)].update(
-                extract_entities(str(record.get(args.target_column, "")), synonyms)
+                extract_entities(pathway_step_text(record.get(args.target_column, "")), synonyms)
             )
         reference = dict(reference)
         reference_mode = "closed_corpus_debug_only"

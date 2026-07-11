@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from experiments.runtime_config import asset_path
+
 
 MATRIX_PATH = Path(__file__).with_name("matrix.json")
 RUNTIME_MANIFEST_PATH = Path(__file__).with_name("runtime_manifest.json")
@@ -269,6 +271,7 @@ def main() -> None:
     check_assets.add_argument("--phase", choices=("train", "infer", "both"), default="both")
     check_assets.add_argument("--asset-root", help="Temporarily override the asset root from chatpathway.config.json.")
     check_assets.add_argument("--profile", help="Runtime profile name from chatpathway.config.json.")
+    check_assets.add_argument("--seed", type=int, default=20260711, help="Seed-scoped checkpoint/run tree to inspect.")
     check_assets.add_argument("--check-outputs", action="store_true", help="Also require expected result artifacts to exist.")
     check_assets.add_argument("--create-output-dirs", action="store_true", help="Create output parent directories if missing.")
     check_assets.add_argument("--jsonl", help="Optional JSONL output path.")
@@ -280,6 +283,20 @@ def main() -> None:
     prepare_smoke.add_argument("--rows", type=int, default=2)
     prepare_smoke.add_argument("--overwrite", action="store_true")
     prepare_smoke.add_argument("--skip-missing", action="store_true")
+
+    prepare_data = sub.add_parser("prepare-data", help="Build record-balanced pilot and eval CSVs from the full KEGG CSVs.")
+    prepare_data.add_argument("--record-fraction", type=float, default=0.001)
+    prepare_data.add_argument("--phenotype-record-fraction", type=float, default=1.0)
+    prepare_data.add_argument("--max-prefixes-per-record", type=int, default=3)
+    prepare_data.add_argument("--max-test-prefixes-per-record", type=int, default=1)
+    prepare_data.add_argument("--max-multistep-prefixes-per-record", type=int, default=3)
+    prepare_data.add_argument("--seed", type=int, default=20260711)
+    prepare_data.add_argument("--overwrite", action="store_true")
+
+    download_model = sub.add_parser("download-model", help="Download and verify the pinned Qwen3-8B snapshot.")
+    download_model.add_argument("--revision", default="b968826")
+    download_model.add_argument("--endpoint")
+    download_model.add_argument("--verify-only", action="store_true")
 
     args = parser.parse_args()
     matrix = load_matrix()
@@ -403,7 +420,9 @@ def main() -> None:
             command.append("--strict")
         if args.quiet:
             command.append("--quiet")
-        raise SystemExit(subprocess.run(command, check=False).returncode)
+        env = os.environ.copy()
+        env["CHATPATHWAY_EXPERIMENT_SEED"] = str(args.seed)
+        raise SystemExit(subprocess.run(command, env=env, check=False).returncode)
 
     if args.command == "prepare-smoke":
         command = [sys.executable, "-m", "experiments.prepare_smoke_inputs", "--rows", str(args.rows)]
@@ -411,6 +430,56 @@ def main() -> None:
             command.append("--overwrite")
         if args.skip_missing:
             command.append("--skip-missing")
+        raise SystemExit(subprocess.run(command, check=False).returncode)
+
+    if args.command == "prepare-data":
+        command = [
+            sys.executable,
+            "-m",
+            "dataprocess.prepare_experiment_data",
+            "--train-input",
+            asset_path("data/train_kegg_pathway_dataset.csv"),
+            "--test-input",
+            asset_path("data/test_kegg_pathway_dataset.csv"),
+            "--train-output",
+            asset_path("data/train_kegg_pathway_pilot.csv"),
+            "--test-output",
+            asset_path("data/test_kegg_pathway_eval.csv"),
+            "--multistep-test-output",
+            asset_path("data/test_kegg_pathway_multistep_eval.csv"),
+            "--record-fraction",
+            str(args.record_fraction),
+            "--phenotype-record-fraction",
+            str(args.phenotype_record_fraction),
+            "--max-prefixes-per-record",
+            str(args.max_prefixes_per_record),
+            "--max-test-prefixes-per-record",
+            str(args.max_test_prefixes_per_record),
+            "--max-multistep-prefixes-per-record",
+            str(args.max_multistep_prefixes_per_record),
+            "--seed",
+            str(args.seed),
+            "--report",
+            asset_path("artifacts/dataset/pilot_record_balanced_v1.json"),
+        ]
+        if args.overwrite:
+            command.append("--overwrite")
+        raise SystemExit(subprocess.run(command, check=False).returncode)
+
+    if args.command == "download-model":
+        command = [
+            sys.executable,
+            "-m",
+            "scripts.model.download_qwen3_8B",
+            "--revision",
+            args.revision,
+            "--target",
+            asset_path("models/qwen3_8B"),
+        ]
+        if args.endpoint:
+            command.extend(["--endpoint", args.endpoint])
+        if args.verify_only:
+            command.append("--verify-only")
         raise SystemExit(subprocess.run(command, check=False).returncode)
 
 

@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
+try:
+    from dataprocess.substeps import parse_substeps
+except ImportError:  # Allows direct script execution from dataprocess/.
+    from substeps import parse_substeps  # type: ignore
+
 
 CSV_FIELDNAMES = [
+    "sample_id",
+    "record_id",
     "question",
     "answer",
     "question_type",
@@ -26,6 +34,8 @@ CSV_FIELDNAMES = [
     "prefix_step_count",
     "target_step_count",
     "has_empty_prefix",
+    "substep_schema_version",
+    "substep_source",
 ]
 
 
@@ -42,22 +52,27 @@ class PathwayStep:
     source_items: Sequence[str] = field(default_factory=tuple)
 
     def prompt_line(self) -> str:
-        return f"Step {self.step_index}: {self.text}"
+        events = parse_substeps(self.text, source_items=self.source_items)
+        rendered = "\n".join(f"  - Event {event.index}: {event.text}" for event in events)
+        return f"Step {self.step_index} ({self.layer_id}; same-depth events):\n{rendered}"
 
     def answer_object(self) -> dict[str, object]:
         return {
             "step": self.step_index,
             "layer": self.layer_id,
-            "text": self.text,
+            "substeps": [
+                event.as_dict()
+                for event in parse_substeps(self.text, source_items=self.source_items)
+            ],
         }
 
 
 @dataclass(frozen=True)
 class PhenotypeTarget:
-    """Phenotype supervision extracted from processed_graph, if present."""
+    """Explicit block-level phenotype supervision, if present."""
 
     text: Optional[str] = None
-    status: str = "missing"
+    status: str = "not_annotated"
     source: str = ""
 
     @property
@@ -88,6 +103,13 @@ class PathwayRecord:
     phenotype: PhenotypeTarget
 
     @property
+    def record_id(self) -> str:
+        identity = "\n".join(
+            (self.organism, self.source_json, self.pathway_id, self.pathway_block)
+        )
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+    @property
     def total_step(self) -> int:
         return max(len(self.steps) - 1, 0)
 
@@ -113,6 +135,10 @@ class PathwayExample:
             return -1
         return self.observed_steps[-1].step_index
 
+    @property
+    def sample_id(self) -> str:
+        return f"{self.record.record_id}:prefix={self.prefix_len}"
+
     def question(self) -> str:
         lines = [
             "You are an expert in biological pathway reasoning.",
@@ -121,9 +147,9 @@ class PathwayExample:
             "",
             "Instructions:",
             "- Treat each Step as one ordered graph-layer transition from upstream to downstream.",
-            "- A Step may summarize multiple reaction or relation events that occur in the same graph layer.",
+            "- Each Step contains one or more substeps/events at the same graph depth; do not invent an order among same-depth events.",
             "- Predict only the remaining downstream Steps; do not repeat observed Steps.",
-            '- Return valid JSON only, with keys "remaining_steps" and "predicted_phenotype".',
+            '- Return valid JSON only, with keys "remaining_steps" and "predicted_phenotype"; each remaining Step must contain "step", "layer", and a "substeps" list.',
             '- Use null for "predicted_phenotype" when the source graph has no phenotype annotation.',
             "",
             f"Organism: {self.record.organism or 'unknown'}",
@@ -158,6 +184,8 @@ class PathwayExample:
     def csv_row(self) -> dict[str, object]:
         phenotype_text = self.record.phenotype.text or ""
         return {
+            "sample_id": self.sample_id,
+            "record_id": self.record.record_id,
             "question": self.question(),
             "answer": self.answer_json(),
             "question_type": QUESTION_TYPE,
@@ -176,4 +204,6 @@ class PathwayExample:
             "prefix_step_count": self.prefix_len,
             "target_step_count": len(self.remaining_steps),
             "has_empty_prefix": int(self.prefix_len == 0),
+            "substep_schema_version": "layer_set_v1",
+            "substep_source": "processed_source_items",
         }

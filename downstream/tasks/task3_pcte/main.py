@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from downstream.common.io import load_records, mean, write_json, write_rows
+from downstream.common.pathway_json import record_id
 
 
 def cosine_distance(left: np.ndarray, right: np.ndarray) -> float:
@@ -77,7 +78,13 @@ def remove_padding(trajectory: np.ndarray) -> np.ndarray:
     return trajectory[: valid[-1] + 1] if valid.size else trajectory[:0]
 
 
-def evaluate(predicted: list[np.ndarray], target: list[np.ndarray], metric: str, max_length: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def evaluate(
+    predicted: list[np.ndarray],
+    target: list[np.ndarray],
+    metric: str,
+    max_length: int,
+    sample_ids: list[Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if len(predicted) != len(target):
         raise ValueError("Predicted and target inputs must contain the same number of trajectories.")
     rows = []
@@ -87,7 +94,8 @@ def evaluate(predicted: list[np.ndarray], target: list[np.ndarray], metric: str,
             continue
         distance, path_length = dtw_distance(prediction, truth, metric, max_length)
         rows.append({
-            "sample_id": index, "predicted_steps": len(prediction), "target_steps": len(truth),
+            "sample_id": sample_ids[index] if sample_ids is not None else index,
+            "predicted_steps": len(prediction), "target_steps": len(truth),
             "pcte": distance, "dtw_path_length": path_length,
         })
     return rows, {"num_samples": len(rows), "metric": metric, "mean_pcte": mean([float(row["pcte"]) for row in rows])}
@@ -126,7 +134,10 @@ def load_projection(checkpoint: str, device: Any, dtype: Any) -> Any:
     return projection.to(device=device, dtype=dtype).eval()
 
 
-def extract_latents(records: list[dict[str, Any]], args: argparse.Namespace) -> tuple[list[np.ndarray], list[np.ndarray]]:
+def extract_latents(
+    records: list[dict[str, Any]],
+    args: argparse.Namespace,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[Any]]:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -137,20 +148,25 @@ def extract_latents(records: list[dict[str, Any]], args: argparse.Namespace) -> 
     if args.adapter:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, args.adapter).eval()
-    projection = load_projection(args.ae_ckpt, device, dtype)
-    predicted, target = [], []
-    for record in records[: args.limit]:
+    projection = load_projection(args.ae_ckpt, device, torch.float32)
+    predicted, target, sample_ids = [], [], []
+    for index, record in enumerate(records[: args.limit]):
         prompt = f"<|im_start|>user\n{record.get(args.question_column, '')}<|im_end|>\n<|im_start|>assistant\n"
-        prefix_length = len(tokenizer.encode(prompt, add_special_tokens=False))
+        prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
         for collection, column in ((predicted, args.predicted_column), (target, args.target_column)):
-            text = f"{record.get(column, '')}<|im_end|>"
-            ids = tokenizer.encode(prompt + text, add_special_tokens=False, truncation=True, max_length=args.max_length)
+            continuation_ids = tokenizer.encode(
+                f"{record.get(column, '')}<|im_end|>",
+                add_special_tokens=False,
+            )
+            ids = (prompt_ids + continuation_ids)[-args.max_length :]
+            retained_prompt = max(0, len(ids) - len(continuation_ids))
             input_ids = torch.tensor(ids, device=device).unsqueeze(0)
             with torch.no_grad():
                 hidden = model(input_ids=input_ids, output_hidden_states=True).hidden_states[-1][0]
-                latent = projection(hidden.to(dtype))[prefix_length:].float().cpu().numpy()
+                latent = projection(hidden.float())[retained_prompt:].float().cpu().numpy()
             collection.append(latent)
-    return predicted, target
+        sample_ids.append(record_id(record, index))
+    return predicted, target, sample_ids
 
 
 def main() -> None:
@@ -176,6 +192,7 @@ def main() -> None:
         if not args.target_latents:
             parser.error("--target-latents is required with --pred-latents.")
         predicted, target = load_latents(args.pred_latents), load_latents(args.target_latents)
+        sample_ids = None
         extraction_mode = "precomputed_latents"
     else:
         if not args.base_model or not args.ae_ckpt:
@@ -183,9 +200,9 @@ def main() -> None:
         records = load_records(args.input)
         if args.limit is None:
             args.limit = len(records)
-        predicted, target = extract_latents(records, args)
+        predicted, target, sample_ids = extract_latents(records, args)
         extraction_mode = "online_hidden_state_projection"
-    rows, summary = evaluate(predicted, target, args.metric, args.dtw_max_length)
+    rows, summary = evaluate(predicted, target, args.metric, args.dtw_max_length, sample_ids)
     summary["extraction_mode"] = extraction_mode
     output_dir = Path(args.output_dir)
     write_rows(output_dir / "sample_metrics.csv", rows)

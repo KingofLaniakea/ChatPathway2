@@ -1,1 +1,1 @@
-"""Experiment exp001_hnn_reconae_joint_direct: Current pipeline: force/damped HNN + reconstruction AE + joint second LoRA + direct inference."""
+"""Pure-HNN, shared-AE, joint stage-2 LoRA, direct-inference experiment."""

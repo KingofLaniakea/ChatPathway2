@@ -1,0 +1,8 @@
+{
+  "title": "Forced/damped HNN + shared reconstruction AE + joint second LoRA + direct inference",
+  "a_dynamics": "a2_forced_damped_hnn",
+  "b_ae": "b0_reconstruction_ae_shared",
+  "d_training_schedule": "d2_stage2_joint_dynamics",
+  "c_inference": "c0_direct_lora",
+  "status": "runnable_core_primary"
+}

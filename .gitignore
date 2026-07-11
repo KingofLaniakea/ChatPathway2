@@ -11,3 +11,6 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Local rendered references and transient audit artifacts.
+tmp/

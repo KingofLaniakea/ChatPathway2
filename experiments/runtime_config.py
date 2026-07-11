@@ -10,6 +10,7 @@ from typing import Any
 
 CONFIG_ENV = "CHATPATHWAY_CONFIG"
 PROFILE_ENV = "CHATPATHWAY_PROFILE"
+ASSET_ROOT_ENV = "CHATPATHWAY_ASSET_ROOT"
 DEFAULT_PROFILE = "autodl"
 DEFAULT_ASSET_ROOT = "/root/autodl-tmp"
 
@@ -66,6 +67,9 @@ def resolve_configured_path(value: str) -> Path:
 
 
 def asset_root(profile: str | None = None) -> Path:
+    overridden = os.environ.get(ASSET_ROOT_ENV)
+    if overridden:
+        return resolve_configured_path(overridden)
     profile_data = profile_config(profile)
     return resolve_configured_path(profile_data.get("asset_root", DEFAULT_ASSET_ROOT))
 

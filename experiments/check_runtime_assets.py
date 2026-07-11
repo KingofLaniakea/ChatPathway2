@@ -46,6 +46,9 @@ def select_ids(all_ids: list[str], raw_ids: str | None) -> list[str]:
 
 def rewrite_asset_path(raw_path: str, manifest_root: str, asset_root: str | None) -> Path:
     expanded = os.path.expanduser(raw_path)
+    seed = os.environ.get("CHATPATHWAY_EXPERIMENT_SEED")
+    if seed:
+        expanded = expanded.replace("/seeds/20260711/", f"/seeds/{seed}/")
     if asset_root and expanded.startswith(manifest_root.rstrip("/") + "/"):
         suffix = expanded[len(manifest_root.rstrip("/")) + 1 :]
         return Path(asset_root) / suffix

@@ -1,22 +1,15 @@
-# ChatPathway method
+# Maintained method path
 
-| Directory | Contents |
+| Path | Role |
 | --- | --- |
-| `training/` | Current SFT, latent-AE, FrameworkA, PHNN prototype, and LeJEPA probe training entry points |
-| `training/legacy/` | Historical distributed HNN/SFT variants, kept for provenance only |
-| `inference/` | Pathway text generation and method-probe inference entry points |
-| `dynamics/` | Shared latent-dynamics teacher models and rollout utilities |
+| `training/sft.py` | four-GPU-capable shared LoRA SFT |
+| `training/latent_ae.py` | shared prompt-anchor/answer-state reconstruction AE |
+| `training/framework_a.py` | compute-matched stage-2 SFT, HNN, and forced/damped HNN |
+| `training/sequence.py` | common head-tail token budget and graph-layer span alignment |
+| `dynamics/hamiltonian.py` | `J grad H` and `(J-rI) grad H + F(t)` |
+| `inference/pathway.py` | direct greedy JSON generation only |
+| `analysis/semantic_latent_export.py` | Task 0/2 held-out graph-layer NPZ export |
 
-The current baseline command is:
-
-```bash
-python -m method.inference.pathway
-```
-
-It is direct LoRA generation. It does not load or execute the separately saved
-HNN or AE checkpoint at runtime. See `docs/METHOD_PROVENANCE.md` for the
-training and inference boundary.
-
-For the full run order and source boundary, see `docs/WORKFLOW.md` and
-`docs/CODE_PROVENANCE.md`. The PHNN prototype is documented in
-`docs/PHNN_TRAINING_DESIGN.md`.
+The HNN is a stage-2 regularizer and diagnostic, not a per-token decoder. The
+active inference command loads only base+LoRA. Historical dynamics prototypes
+elsewhere in `method/` are not selectable rows in the maintained matrix.

@@ -1,263 +1,158 @@
 {
-  "version": "2026-07-08a",
+  "version": "2026-07-11c",
   "asset_root": "/root/autodl-tmp",
   "rows": {
-    "exp000_sft_only_direct": {
+    "base000_shared_sft_reconae": {
       "requires": [
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "runtime_notes": "Default manifest seed is 20260711. Train once per seed; CFFF uses four-process DDP for SFT and one GPU for AE."
+    },
+    "exp000_sft_only_direct": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp000_sft_only_direct/sft/checkpoint_epoch_5"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp000_sft_only_direct/sft/checkpoint_epoch_5"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp000_sft_only_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.csv"
       ],
-      "runtime_notes": "From scratch wrapper trains SFT, then direct inference uses that adapter."
+      "runtime_notes": "Stage-1 direct baseline."
+    },
+    "exp003_stage2_sft_only_direct": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.csv"
+      ],
+      "runtime_notes": "Compute-matched stage-2 control: identical loop with all dynamics weights and dynamics LR zero."
     },
     "exp001_hnn_reconae_joint_direct": {
       "requires": [
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp001_hnn_reconae_joint_direct/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp001_hnn_reconae_joint_direct/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_epoch_4"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_epoch_4"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp001_hnn_reconae_joint_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv"
       ],
-      "runtime_notes": "This row replaces the ambiguous old FrameworkA row name. It is the current main comparison line."
+      "runtime_notes": "Pure HNN with orthogonal Poisson structure and graph-layer/set targets."
     },
-    "exp002_phnn_reconae_joint_direct": {
+    "exp002_forced_damped_hnn_reconae_joint_direct": {
       "requires": [
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
+        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
+        "/root/autodl-tmp/data/test_kegg_pathway_eval.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp002_phnn_reconae_joint_direct/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp002_phnn_reconae_joint_direct/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp002_phnn_reconae_joint_direct/final_lora/checkpoint_epoch_4"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp002_phnn_reconae_joint_direct/final_lora/checkpoint_epoch_4"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp002_phnn_reconae_joint_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv"
       ],
-      "runtime_notes": "Same layer settings as exp001 except HNN replaced by PHNN."
-    },
-    "exp003_neuralode_reconae_teacher_direct": {
-      "requires": [
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp003_neuralode_reconae_teacher_direct/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp003_neuralode_reconae_teacher_direct/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp003_neuralode_reconae_teacher_direct/teacher/neural_ode/neural_ode_epoch_3.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp003_neuralode_reconae_teacher_direct/final_lora/checkpoint_epoch_3"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp003_neuralode_reconae_teacher_direct/final_lora/checkpoint_epoch_3"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp003_neuralode_reconae_teacher_direct/direct.csv"
-      ],
-      "runtime_notes": "This is the implemented staged baseline; HNN staged is still planned separately."
-    },
-    "exp004_neuralode_reconae_joint_direct": {
-      "requires": [
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp004_neuralode_reconae_joint_direct/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp004_neuralode_reconae_joint_direct/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp004_neuralode_reconae_joint_direct/final_lora/neural_ode/checkpoint_epoch_3"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp004_neuralode_reconae_joint_direct/final_lora/neural_ode/checkpoint_epoch_3"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp004_neuralode_reconae_joint_direct/direct.csv"
-      ],
-      "runtime_notes": "Uses generalized joint_lora_dynamics implementation."
-    },
-    "exp005_gradientflow_reconae_joint_direct": {
-      "requires": [
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp005_gradientflow_reconae_joint_direct/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp005_gradientflow_reconae_joint_direct/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp005_gradientflow_reconae_joint_direct/final_lora/gradient_flow/checkpoint_epoch_3"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp005_gradientflow_reconae_joint_direct/final_lora/gradient_flow/checkpoint_epoch_3"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp005_gradientflow_reconae_joint_direct/direct.csv"
-      ],
-      "runtime_notes": "Secondary because HNN/PHNN/Neural ODE answer the immediate project questions first."
-    },
-    "exp010_neuralode_reconae_teacher_rerank_partial": {
-      "requires": [
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/runs/experiments/exp010_neuralode_reconae_teacher_rerank_partial/candidates.csv"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/runs/experiments/exp010_neuralode_reconae_teacher_rerank_partial/candidates.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/exp010_neuralode_reconae_teacher_rerank_partial/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp010_neuralode_reconae_teacher_rerank_partial/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp010_neuralode_reconae_teacher_rerank_partial/teacher/neural_ode/neural_ode_epoch_3.pt"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/exp010_neuralode_reconae_teacher_rerank_partial/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/checkpoints/experiments/exp010_neuralode_reconae_teacher_rerank_partial/ae/ae_epoch_5/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/experiments/exp010_neuralode_reconae_teacher_rerank_partial/teacher/neural_ode/neural_ode_epoch_3.pt"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/exp010_neuralode_reconae_teacher_rerank_partial/reranked.csv"
-      ],
-      "runtime_notes": "Not a complete c1 pipeline yet because it does not generate multiple candidates."
-    },
-    "x001_c2s_transfer_after_model_selection": {
-      "requires": [
-        "/root/autodl-tmp/checkpoints/selected_pathway_adapter/checkpoint_epoch_best",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl",
-        "/root/autodl-tmp/models/qwen3_8B"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/checkpoints/selected_pathway_adapter/checkpoint_epoch_best",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_train_seen_small_5percent.jsonl"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/CRISPR_GSE264667_Data/jurkat_c2s_test_unseen_small_5percent.jsonl"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/x001_c2s_transfer_after_model_selection/final_lora/checkpoint_epoch_5"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/x001_c2s_transfer_after_model_selection/final_lora/checkpoint_epoch_5"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/x001_c2s_transfer_after_model_selection/c2s.jsonl"
-      ],
-      "runtime_notes": "Run after core model choice stabilizes."
-    },
-    "z001_lejepa_speculative_probe": {
-      "requires": [
-        "/root/autodl-tmp/checkpoints/experiments/exp000_sft_only_direct/sft/checkpoint_epoch_5",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/models/qwen3_8B"
-      ],
-      "train_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_11_species_dataset.csv",
-        "/root/autodl-tmp/checkpoints/experiments/exp000_sft_only_direct/sft/checkpoint_epoch_5"
-      ],
-      "infer_requires": [
-        "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/test_7_species_dataset.csv"
-      ],
-      "train_outputs": [
-        "/root/autodl-tmp/checkpoints/experiments/z001_lejepa_speculative_probe/lejepa_epoch_3.pt"
-      ],
-      "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/experiments/z001_lejepa_speculative_probe/lejepa_epoch_3.pt"
-      ],
-      "infer_outputs": [
-        "/root/autodl-tmp/runs/experiments/z001_lejepa_speculative_probe/scores.jsonl"
-      ],
-      "runtime_notes": "Lowest priority, excluded from first benchmark."
+      "runtime_notes": "Primary row: (J-rI) grad H + F(t), orthogonal Poisson J, isotropic PSD damping, direct inference."
     }
   },
   "storage_plan": {
     "repo_checkout": "ChatPathway2",
     "default_asset_root": "/root/autodl-tmp",
-    "override": "Edit chatpathway.config.json active_profile or profile asset_root for each server.",
+    "override": "Set CHATPATHWAY_PROFILE=cfff or CHATPATHWAY_ASSET_ROOT; pass --seed to select the seed-scoped checkpoint/run tree.",
     "subdirs": {
-      "models": "Base models.",
-      "data": "Datasets.",
-      "checkpoints": "From-scratch experiment checkpoints under checkpoints/experiments/<id>.",
-      "runs": "Outputs under runs/experiments/<id>.",
-      "artifacts": "Reports and figures."
+      "models": "Pinned base model",
+      "data": "Full source CSV plus prepared pilot/eval CSVs",
+      "checkpoints": "Shared and seed-specific experiment checkpoints",
+      "runs": "Inference outputs",
+      "artifacts": "Audits and downstream reports"
     }
-  },
-  "config_file": "chatpathway.config.json"
+  }
 }

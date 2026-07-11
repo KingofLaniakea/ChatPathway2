@@ -1,13 +1,11 @@
 {
-  "title": "Current pipeline: force/damped HNN + reconstruction AE + joint second LoRA + direct inference",
-  "a_dynamics": "a1_force_damped_hnn_current_control",
-  "b_ae": "b0_reconstruction_ae_frozen_current",
-  "d_training": "d2_joint_second_lora_and_dynamics",
+  "title": "Pure HNN + shared reconstruction AE + joint second LoRA + direct inference",
+  "a_dynamics": "a1_hnn_orthogonal_poisson",
+  "b_ae": "b0_reconstruction_ae_shared",
+  "d_training_schedule": "d2_stage2_joint_dynamics",
   "c_inference": "c0_direct_lora",
-  "status": "runnable_current_main",
+  "status": "runnable_core_control",
   "method_train_entrypoints": [
-    "method.training.sft",
-    "method.training.latent_ae",
     "method.training.framework_a"
   ],
   "method_infer_entrypoint": "method.inference.pathway"

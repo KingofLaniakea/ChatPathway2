@@ -1,318 +1,414 @@
+"""Train the shared reconstruction AE bridge with deterministic model selection."""
+
+from __future__ import annotations
+
 import argparse
-import json
-import os
-import pandas as pd
 import csv
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
-# ================= 1. Configuration =================
-class Config:
-    base_model_id = "/root/autodl-tmp/models/qwen3_8B"
-    sft_lora_path = "/root/autodl-tmp/checkpoints/legacy/qwen3_8b_sft/checkpoint_epoch_5"
-    train_path = "/root/autodl-tmp/data/train_11_species_dataset.csv"
-    save_path = "/root/autodl-tmp/checkpoints/qwen3_8b_ae_latent_128_cos"
-
-    batch_size = 32     
-    gradient_accumulation_steps = 2
-    lr = 1e-4                  
-    epochs = 5               
-    max_length = 1072
-    latent_dim = 128         
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
-
-CONFIG_FIELDS = (
-    "base_model_id",
-    "sft_lora_path",
-    "train_path",
-    "save_path",
-    "batch_size",
-    "gradient_accumulation_steps",
-    "lr",
-    "epochs",
-    "max_length",
-    "latent_dim",
-    "device",
+from method.training.common import (
+    EarlyStopping,
+    artifact_sha256,
+    base_model_identity,
+    accumulation_divisor,
+    append_jsonl,
+    configure_logger,
+    ensure_disjoint_groups,
+    ensure_new_output_dir,
+    file_sha256,
+    git_commit,
+    seed_everything,
+    stable_group_split,
+    write_json,
 )
+from method.training.sequence import encode_supervised
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train the ChatPathway hidden-state AE projector.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--base-model", dest="base_model_id", default=Config.base_model_id)
-    parser.add_argument("--sft-lora", dest="sft_lora_path", default=Config.sft_lora_path)
-    parser.add_argument("--train", dest="train_path", default=Config.train_path)
-    parser.add_argument("--save-dir", dest="save_path", default=Config.save_path)
-    parser.add_argument("--batch-size", type=int, default=Config.batch_size)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=Config.gradient_accumulation_steps)
-    parser.add_argument("--lr", type=float, default=Config.lr)
-    parser.add_argument("--epochs", type=int, default=Config.epochs)
-    parser.add_argument("--max-length", type=int, default=Config.max_length)
-    parser.add_argument("--latent-dim", type=int, default=Config.latent_dim)
-    parser.add_argument("--device", default=Config.device)
+DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
+DEFAULT_SFT = "/root/autodl-tmp/checkpoints/shared/pathway_sft/checkpoint_best"
+DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
+DEFAULT_SAVE = "/root/autodl-tmp/checkpoints/shared/pathway_reconstruction_ae"
+
+
+@dataclass
+class AEConfig:
+    base_model: str
+    sft_lora: str
+    train_path: str
+    validation_path: str | None
+    save_dir: str
+    batch_size: int
+    gradient_accumulation_steps: int
+    lr: float
+    epochs: int
+    max_length: int
+    answer_budget_fraction: float
+    latent_dim: int
+    cosine_weight: float
+    validation_fraction: float
+    validation_group_column: str
+    early_stopping_patience: int
+    early_stopping_min_delta: float
+    seed: int
+    deterministic: bool
+    limit: int | None
+    hash_inputs: bool
+    device: str
+
+
+def parse_args() -> AEConfig:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
+    parser.add_argument("--sft-lora", default=DEFAULT_SFT)
+    parser.add_argument("--train", dest="train_path", default=DEFAULT_TRAIN)
+    parser.add_argument("--validation", dest="validation_path")
+    parser.add_argument("--save-dir", default=DEFAULT_SAVE)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--max-length", type=int, default=1072)
+    parser.add_argument("--answer-budget-fraction", type=float, default=0.5)
+    parser.add_argument("--latent-dim", type=int, default=128)
+    parser.add_argument("--cosine-weight", type=float, default=2.0)
+    parser.add_argument("--validation-fraction", type=float, default=0.05)
+    parser.add_argument("--validation-group-column", default="source_json")
+    parser.add_argument("--early-stopping-patience", type=int, default=3)
+    parser.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
+    parser.add_argument("--seed", type=int, default=20260711)
+    parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--hash-inputs", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
-    cfg = Config()
-    for key, value in vars(args).items():
-        setattr(cfg, key, value)
-    return cfg
+    if not 0 < args.answer_budget_fraction < 1:
+        parser.error("--answer-budget-fraction must be between 0 and 1")
+    return AEConfig(**vars(args))
 
 
-def config_to_dict(cfg):
-    return {field: getattr(cfg, field) for field in CONFIG_FIELDS}
-
-# ================= 2. AE =================
 class CascadeProjection(nn.Module):
-    def __init__(self, high_dim=4096, mid_dim=1024, latent_dim=128):
+    def __init__(self, high_dim: int = 4096, mid_dim: int = 1024, latent_dim: int = 128):
         super().__init__()
         self.down = nn.Sequential(
             nn.Linear(high_dim, mid_dim),
             nn.LayerNorm(mid_dim),
-            nn.SiLU(), 
+            nn.SiLU(),
             nn.Linear(mid_dim, mid_dim // 2),
             nn.LayerNorm(mid_dim // 2),
             nn.SiLU(),
-            nn.Linear(mid_dim // 2, latent_dim)
+            nn.Linear(mid_dim // 2, latent_dim),
         )
         self.up = nn.Sequential(
             nn.Linear(latent_dim, mid_dim // 2),
             nn.SiLU(),
             nn.Linear(mid_dim // 2, mid_dim),
             nn.SiLU(),
-            nn.Linear(mid_dim, high_dim)
+            nn.Linear(mid_dim, high_dim),
         )
-    def forward(self, x):
-        latent = self.down(x)
-        reconstructed = self.up(latent)
-        return latent, reconstructed
 
-# ================= 3. Data Processing =================
+    def forward(self, hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        latent = self.down(hidden)
+        return latent, self.up(latent)
+
+
 class AEDataset(Dataset):
-    def __init__(self, file_path, tokenizer, max_length=1072):
+    def __init__(
+        self,
+        frame: pd.DataFrame,
+        tokenizer: Any,
+        max_length: int,
+        answer_budget_fraction: float,
+    ):
+        self.records = frame.to_dict(orient="records")
         self.tokenizer = tokenizer
         self.max_length = max_length
-        
-        self.df = pd.read_csv(
-            file_path, 
-            engine='python',
-            quoting=csv.QUOTE_MINIMAL, 
-            on_bad_lines='skip'
-        )
-        print(f"\n[✓] Successfully loaded AE training dataset with {len(self.df)} clean samples.")
-        
-        print("="*40 + " [DATASET SELF-CHECK] " + "="*40)
-        print("[*] Printing the 1st sample to verify structure:")
-        first_row = self.df.iloc[0]
-        q_preview = str(first_row['question']).replace('\n', ' [\\n] ') + "..."
-        a_preview = str(first_row['answer']).replace('\n', ' [\\n] ') + "..."
-        print(f" -> Columns in CSV: {list(self.df.columns)}")
-        print(f" -> row[0]['question'] (Preview): {q_preview}")
-        print(f" -> row[0]['answer']   (Preview): {a_preview}")
-        print("="*102 + "\n")
-        
-        self.assistant_prefix_ids = self.tokenizer("<|im_start|>assistant\n", add_special_tokens=False)["input_ids"]
+        self.answer_budget_fraction = answer_budget_fraction
 
-    def __len__(self): 
-        return len(self.df)
-        
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        
-        question = str(row['question']) if not pd.isna(row['question']) else ""
-        raw_answer = row.get('answer', row.get('formatted_answer_no_phenotype', ""))
-        answer = str(raw_answer) if not pd.isna(raw_answer) else ""
-        
-        prompt_text = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n{answer}<|im_end|>"
-        
-        inputs = self.tokenizer(prompt_text, max_length=self.max_length, truncation=True, padding=False, return_tensors=None)
-        input_ids = inputs["input_ids"]
-        
-        loss_mask = [0] * len(input_ids)
-        
-        start_idx = 0
-        n_prefix = len(self.assistant_prefix_ids)
-        for i in range(len(input_ids) - n_prefix + 1):
-            if input_ids[i:i+n_prefix] == self.assistant_prefix_ids:
-                start_idx = i + n_prefix
-                break
-        
-        if start_idx > 0:
-            for i in range(start_idx, len(input_ids)):
-                loss_mask[i] = 1
-                
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        row = self.records[index]
+        question = str(row.get("question", ""))
+        answer = str(row.get("answer", row.get("formatted_answer_no_phenotype", "")))
+        prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
+        encoded = encode_supervised(
+            self.tokenizer,
+            prompt,
+            answer,
+            max_length=self.max_length,
+            answer_budget_fraction=self.answer_budget_fraction,
+        )
+        loss_mask = [int(label != -100) for label in encoded.labels]
+        first_answer = next((index for index, active in enumerate(loss_mask) if active), None)
+        if first_answer is not None and first_answer > 0:
+            # The Hamiltonian rollout starts from the final prompt token. Train
+            # the AE on that anchor as well as answer states to avoid an OOD z0.
+            loss_mask[first_answer - 1] = 1
         return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "loss_mask": torch.tensor(loss_mask, dtype=torch.long)
+            "input_ids": torch.tensor(encoded.input_ids, dtype=torch.long),
+            "loss_mask": torch.tensor(loss_mask, dtype=torch.long),
+            "prompt_tokens_dropped": encoded.prompt_tokens_dropped,
+            "answer_tokens_dropped": encoded.answer_tokens_dropped,
         }
 
-def collate_fn(batch):
-    pad_id = 151643
-    input_ids = torch.nn.utils.rnn.pad_sequence([b['input_ids'] for b in batch], batch_first=True, padding_value=pad_id)
-    loss_mask = torch.nn.utils.rnn.pad_sequence([b['loss_mask'] for b in batch], batch_first=True, padding_value=0)
-    
+
+def make_collate_fn(pad_id: int):
+    def collate(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            [item["input_ids"] for item in batch], batch_first=True, padding_value=pad_id
+        )
+        loss_mask = torch.nn.utils.rnn.pad_sequence(
+            [item["loss_mask"] for item in batch], batch_first=True, padding_value=0
+        )
+        attention_mask = torch.nn.utils.rnn.pad_sequence(
+            [torch.ones_like(item["input_ids"]) for item in batch],
+            batch_first=True,
+            padding_value=0,
+        )
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "loss_mask": loss_mask,
+            "prompt_tokens_dropped": sum(int(item["prompt_tokens_dropped"]) for item in batch),
+            "answer_tokens_dropped": sum(int(item["answer_tokens_dropped"]) for item in batch),
+        }
+
+    return collate
+
+
+def load_frames(cfg: AEConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
+    frame = pd.read_csv(cfg.train_path, engine="c", quoting=csv.QUOTE_MINIMAL, on_bad_lines="error")
+    if cfg.limit is not None:
+        frame = frame.head(cfg.limit)
+    if frame.empty:
+        raise ValueError("AE training CSV contains no rows")
+    if cfg.validation_path:
+        validation = pd.read_csv(
+            cfg.validation_path, engine="c", quoting=csv.QUOTE_MINIMAL, on_bad_lines="error"
+        )
+        if validation.empty:
+            raise ValueError("explicit AE validation CSV contains no rows")
+        ensure_disjoint_groups(
+            frame,
+            validation,
+            group_column=cfg.validation_group_column,
+        )
+        return frame.reset_index(drop=True), validation.reset_index(drop=True)
+    return stable_group_split(
+        frame,
+        validation_fraction=cfg.validation_fraction,
+        seed=cfg.seed,
+        group_column=cfg.validation_group_column,
+    )
+
+
+def reconstruction_losses(
+    *,
+    backbone: nn.Module,
+    projection: CascadeProjection,
+    batch: dict[str, torch.Tensor],
+    device: str,
+    cosine_weight: float,
+) -> dict[str, torch.Tensor] | None:
+    input_ids = batch["input_ids"].to(device)
+    attention_mask = batch["attention_mask"].to(device)
+    loss_mask = batch["loss_mask"].to(device)
+    with torch.no_grad():
+        hidden = backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+        ).hidden_states[-1].float()
+    _, reconstructed = projection(hidden)
+    active = loss_mask.bool()
+    if not active.any():
+        return None
+    target = hidden[active]
+    prediction = reconstructed[active]
+    mse = nn.functional.mse_loss(prediction, target)
+    cosine = 1.0 - nn.functional.cosine_similarity(prediction, target, dim=-1).mean()
+    return {"total": mse + cosine_weight * cosine, "mse": mse, "cosine": cosine}
+
+
+def evaluate(
+    backbone: nn.Module,
+    projection: CascadeProjection,
+    loader: DataLoader,
+    cfg: AEConfig,
+) -> dict[str, float | int]:
+    projection.eval()
+    sums = {"total": 0.0, "mse": 0.0, "cosine": 0.0}
+    steps = 0
+    prompt_dropped = answer_dropped = 0
+    for batch in loader:
+        losses = reconstruction_losses(
+            backbone=backbone,
+            projection=projection,
+            batch=batch,
+            device=cfg.device,
+            cosine_weight=cfg.cosine_weight,
+        )
+        if losses is None:
+            continue
+        for key in sums:
+            sums[key] += float(losses[key].item())
+        steps += 1
+        prompt_dropped += int(batch["prompt_tokens_dropped"])
+        answer_dropped += int(batch["answer_tokens_dropped"])
     return {
-        "input_ids": input_ids, 
-        "attention_mask": (input_ids != pad_id).long(),
-        "loss_mask": loss_mask
+        **{key: value / max(steps, 1) for key, value in sums.items()},
+        "prompt_tokens_dropped": prompt_dropped,
+        "answer_tokens_dropped": answer_dropped,
     }
 
 
-# ================= 4. Training =================
-def train_ae():
+def save_checkpoint(destination: Path, projection: CascadeProjection, epoch: int, metrics: dict[str, Any]) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    torch.save(projection.state_dict(), destination / "ae_proj.pt")
+    write_json(destination / "checkpoint_metrics.json", {"epoch": epoch, **metrics})
+
+
+def train() -> None:
     cfg = parse_args()
-    device = torch.device(cfg.device)
-    
-    os.makedirs(cfg.save_path, exist_ok=True)
-    with open(os.path.join(cfg.save_path, "run_config.json"), "w", encoding="utf-8") as handle:
-        json.dump(config_to_dict(cfg), handle, indent=2, ensure_ascii=False)
-        handle.write("\n")
-    print(f"[*] Training AE based on SFT model: {cfg.sft_lora_path}")
-    print(f"[*] Running on device: {cfg.device}")
+    seed_everything(cfg.seed, deterministic=cfg.deterministic)
+    save_root = ensure_new_output_dir(cfg.save_dir)
+    logger = configure_logger(save_root / "train.log", "pathway_reconstruction_ae")
+    write_json(save_root / "run_config.json", asdict(cfg))
+    train_frame, validation_frame = load_frames(cfg)
+    manifest: dict[str, Any] = {
+        "git_commit": git_commit(Path(__file__).resolve().parents[2]),
+        "train_path": str(Path(cfg.train_path).resolve()),
+        "validation_path": str(Path(cfg.validation_path).resolve()) if cfg.validation_path else "deterministic_group_split",
+        "train_rows": len(train_frame),
+        "validation_rows": len(validation_frame),
+        "seed": cfg.seed,
+        "base_model_identity": base_model_identity(cfg.base_model),
+        "sft_adapter_sha256": artifact_sha256(cfg.sft_lora),
+    }
+    if cfg.hash_inputs:
+        manifest["train_sha256"] = file_sha256(cfg.train_path)
+        if cfg.validation_path:
+            manifest["validation_sha256"] = file_sha256(cfg.validation_path)
+    write_json(save_root / "run_manifest.json", manifest)
+    logger.info("train_rows=%d validation_rows=%d seed=%d", len(train_frame), len(validation_frame), cfg.seed)
 
-    tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.base_model, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    dtype = torch.bfloat16 if cfg.device.startswith("cuda") else torch.float32
     base_model = AutoModelForCausalLM.from_pretrained(
-        cfg.base_model_id, 
-        torch_dtype=torch.float16, 
-        trust_remote_code=True, 
-        device_map=None
+        cfg.base_model,
+        torch_dtype=dtype,
+        trust_remote_code=True,
+        device_map={"": cfg.device},
     )
-    
-    model = PeftModel.from_pretrained(base_model, cfg.sft_lora_path)
-    model.to(device)
-
-    model.eval()
-    for param in model.parameters():
-        param.requires_grad = False
-
-    ae_proj = CascadeProjection(high_dim=base_model.config.hidden_size, latent_dim=cfg.latent_dim).to(device)
-    ae_proj = ae_proj.to(torch.float32)
-
-    optimizer = optim.AdamW(ae_proj.parameters(), lr=cfg.lr)
-    dataset = AEDataset(cfg.train_path, tokenizer, cfg.max_length)
-    
+    backbone = PeftModel.from_pretrained(base_model, cfg.sft_lora).eval()
+    backbone.requires_grad_(False)
+    projection = CascadeProjection(
+        high_dim=base_model.config.hidden_size,
+        latent_dim=cfg.latent_dim,
+    ).to(cfg.device).float()
+    optimizer = optim.AdamW(projection.parameters(), lr=cfg.lr)
+    collate = make_collate_fn(tokenizer.pad_token_id)
     train_loader = DataLoader(
-        dataset, 
-        batch_size=cfg.batch_size, 
-        shuffle=True, 
-        collate_fn=collate_fn
+        AEDataset(train_frame, tokenizer, cfg.max_length, cfg.answer_budget_fraction),
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        generator=torch.Generator().manual_seed(cfg.seed),
+        collate_fn=collate,
     )
-    
-    history = {"rec_mse": [], "rec_cos": []}
-    
-    for epoch in range(cfg.epochs):
-        ae_proj.train()
-        
-        e_mse = 0.0
-        e_cos = 0.0
-        valid_batches = 0
+    validation_loader = DataLoader(
+        AEDataset(validation_frame, tokenizer, cfg.max_length, cfg.answer_budget_fraction),
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        collate_fn=collate,
+    )
+    early_stopping = EarlyStopping(cfg.early_stopping_patience, cfg.early_stopping_min_delta)
+    history: list[dict[str, Any]] = []
+    optimizer.zero_grad(set_to_none=True)
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
-        
-        for step, batch in enumerate(pbar):
-            input_ids = batch['input_ids'].to(device)
-            mask = batch['attention_mask'].to(device)
-            loss_mask = batch['loss_mask'].to(device) 
-
-            with torch.no_grad():
-                outputs = model(input_ids=input_ids, attention_mask=mask, output_hidden_states=True)
-                h_real = outputs.hidden_states[-1].detach().to(torch.float32) 
-            
-            z_latent, h_rec = ae_proj(h_real)
-            
-            active_mask = loss_mask.unsqueeze(-1).expand_as(h_real).bool()
-            
-            if active_mask.sum() == 0:
+    for epoch in range(1, cfg.epochs + 1):
+        projection.train()
+        sums = {"total": 0.0, "mse": 0.0, "cosine": 0.0}
+        steps = 0
+        prompt_dropped = answer_dropped = 0
+        progress = tqdm(train_loader, desc=f"AE epoch {epoch}")
+        for step, batch in enumerate(progress):
+            losses = reconstruction_losses(
+                backbone=backbone,
+                projection=projection,
+                batch=batch,
+                device=cfg.device,
+                cosine_weight=cfg.cosine_weight,
+            )
+            if losses is None:
                 continue
-                
-            # loss_rec = nn.functional.mse_loss(h_rec[active_mask], h_real[active_mask])
-            h_real_active = h_real[active_mask]
-            h_rec_active = h_rec[active_mask]
-
-            # 1. 计算传统的隐空间 MSE 损失
-            mse_loss = nn.functional.mse_loss(h_rec_active, h_real_active)
-            
-            # 2. 计算余弦相似度损失 (1 - cos_sim)，使其范围在 0 到 2 之间，越趋近 0 越好
-            cos_sim = nn.functional.cosine_similarity(h_rec_active, h_real_active, dim=-1)
-            cos_loss = 1.0 - cos_sim.mean()
-
-            loss_rec = mse_loss + 2.0 * cos_loss
-
-
-
-
-            (loss_rec / cfg.gradient_accumulation_steps).backward()
-
-            if (step + 1) % cfg.gradient_accumulation_steps == 0:
-                torch.nn.utils.clip_grad_norm_(ae_proj.parameters(), 1.0)
+            divisor = accumulation_divisor(step, len(train_loader), cfg.gradient_accumulation_steps)
+            (losses["total"] / divisor).backward()
+            for key in sums:
+                sums[key] += float(losses[key].item())
+            steps += 1
+            prompt_dropped += int(batch["prompt_tokens_dropped"])
+            answer_dropped += int(batch["answer_tokens_dropped"])
+            if (step + 1) % cfg.gradient_accumulation_steps == 0 or step + 1 == len(train_loader):
+                nn.utils.clip_grad_norm_(projection.parameters(), 1.0)
                 optimizer.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
+            progress.set_postfix(total=f"{losses['total'].item():.4f}", mse=f"{losses['mse'].item():.4f}")
 
-            e_mse += mse_loss.item()
-            e_cos += cos_loss.item()
-            valid_batches += 1
-            # pbar.set_postfix({"MSE": f"{loss_rec.item():.6f}"})
-            pbar.set_postfix({"Loss": f"{loss_rec.item():.4f}", "MSE": f"{mse_loss.item():.4f}", "Cos": f"{cos_loss.item():.4f}"})
+        train_metrics: dict[str, float | int] = {
+            **{key: value / max(steps, 1) for key, value in sums.items()},
+            "prompt_tokens_dropped": prompt_dropped,
+            "answer_tokens_dropped": answer_dropped,
+        }
+        validation_metrics = evaluate(backbone, projection, validation_loader, cfg)
+        record = {"epoch": epoch, "train": train_metrics, "validation": validation_metrics, "lr": cfg.lr}
+        history.append(record)
+        append_jsonl(save_root / "metrics.jsonl", record)
+        write_json(save_root / "history.json", history)
+        logger.info(
+            "epoch=%d train_total=%.6f val_total=%.6f val_mse=%.6f val_cosine=%.6f",
+            epoch,
+            train_metrics["total"],
+            validation_metrics["total"],
+            validation_metrics["mse"],
+            validation_metrics["cosine"],
+        )
+        save_checkpoint(save_root / f"checkpoint_epoch_{epoch}", projection, epoch, record)
+        improved, should_stop = early_stopping.update(validation_metrics["total"], epoch)
+        if improved:
+            save_checkpoint(save_root / "checkpoint_best", projection, epoch, record)
+            write_json(
+                save_root / "best_checkpoint.json",
+                {
+                    "epoch": epoch,
+                    "monitor": "validation.total",
+                    "value": validation_metrics["total"],
+                    "path": str(save_root / "checkpoint_best"),
+                },
+            )
+        if should_stop:
+            logger.info(
+                "early_stop epoch=%d best_epoch=%d best_validation_total=%.6f",
+                epoch,
+                early_stopping.best_epoch,
+                early_stopping.best,
+            )
+            break
 
-        if len(train_loader) % cfg.gradient_accumulation_steps != 0:
-            torch.nn.utils.clip_grad_norm_(ae_proj.parameters(), 1.0)
-            optimizer.step()
-            optimizer.zero_grad()
-
-        avg_mse = e_mse / max(valid_batches, 1)
-        avg_cos = e_cos / max(valid_batches, 1)
-        history["rec_mse"].append(avg_mse)
-        history["rec_cos"].append(avg_cos)
-        with open(os.path.join(cfg.save_path, "history.json"), "w", encoding="utf-8") as handle:
-            json.dump(history, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-        
-        save_dir = os.path.join(cfg.save_path, f"ae_epoch_{epoch+1}")
-        os.makedirs(save_dir, exist_ok=True)
-        torch.save(ae_proj.state_dict(), os.path.join(save_dir, "ae_proj.pt"))
-
-        fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
-        
-        # 左图：MSE 损失监控
-        axes[0].plot(history["rec_mse"], 'b-o', markersize=4, label='Reconstruction MSE')
-        axes[0].set_title('Manifold Stability (MSE)', fontsize=11, fontweight='bold')
-        axes[0].set_xlabel('Epoch')
-        axes[0].set_ylabel('MSE Loss')
-        axes[0].grid(True, linestyle='--', alpha=0.6)
-        axes[0].legend()
-        
-        # 右图：Cosine 损失监控（反映方向对齐度）
-        axes[1].plot(history["rec_cos"], 'g-s', markersize=4, label='Directional Cosine Loss')
-        axes[1].set_title('Trajectory Angle Alignment (1-Cos)', fontsize=11, fontweight='bold')
-        axes[1].set_xlabel('Epoch')
-        axes[1].set_ylabel('Cosine Loss')
-        axes[1].grid(True, linestyle='--', alpha=0.6)
-        axes[1].legend()
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(cfg.save_path, f'ae_monitor_epoch_{epoch+1}.png'), dpi=300) 
-        plt.close()
-
-        # avg_rec = e_rec / len(train_loader)
-        # history["rec_mse"].append(avg_rec)
-        
-        # save_dir = os.path.join(cfg.save_path, f"ae_epoch_{epoch+1}")
-        # os.makedirs(save_dir, exist_ok=True)
-        # torch.save(ae_proj.state_dict(), os.path.join(save_dir, "ae_proj.pt"))
-
-        # plt.figure(figsize=(6, 4))
-        # plt.plot(history["rec_mse"], 'b-', label='Reconstruction MSE')
-        # plt.title('Manifold Stability (SFT-Frozen)')
-        # plt.xlabel('Epoch')
-        # plt.ylabel('MSE')
-        # plt.grid(True)
-        # plt.savefig(os.path.join(cfg.save_path, f'ae_monitor_epoch_{epoch+1}.png'))
-        # plt.close()
 
 if __name__ == "__main__":
-    train_ae()
+    train()

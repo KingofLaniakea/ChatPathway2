@@ -16,8 +16,9 @@ project implementation.
 | --- | --- | --- | --- |
 | Method training | `method/training/sft.py` | Migrated from the audited server snapshot file `method/Qwen3_8B_SFT.py`, imported in commit `a419f53` and reorganized in `2044df2`; this revision replaces the historical DDP-only wrapper with a maintained argparse entry point. | Current SFT LoRA training entry point; supports single-process and torchrun/DDP execution. |
 | Method training | `method/training/latent_ae.py` | Migrated from the audited server snapshot file `method/Qwen3_8B_Latent_AE_new.py`, imported in `a419f53` and reorganized in `2044df2`. | Current AE projector training entry point; this revision fixes loss-history initialization and tail gradient accumulation. |
-| Method training | `method/training/framework_a.py` | Migrated from the audited server snapshot file `method/Qwen3_8B_Method_FrameworkA.py`, imported in `a419f53` and reorganized in `2044df2`. | Current FrameworkA training entry point; this revision restores alignment gradients to HNN and fixes answer-span indexing. |
-| Method training prototype | `method/training/framework_a_phnn.py` | Newly copied from maintained `method/training/framework_a.py` and edited in ChatPathway2. It is not a migrated server result. | Experimental PHNN training variant with explicit `J`, positive diagonal `R`, and prompt-latent control input `u`. |
+| Method training | `method/training/framework_a.py` | Migrated from the audited server snapshot file `method/Qwen3_8B_Method_FrameworkA.py`, imported in `a419f53` and reorganized in `2044df2`, then structurally revised in ChatPathway2. | Current shared HNN/forced-damped-HNN trainer with validation, early stopping, best-checkpoint selection, and fixed-horizon dynamics. |
+| Method dynamics | `method/dynamics/hamiltonian.py` | Newly authored in ChatPathway2 after auditing the historical forced/damped implementation against the cited HNN literature. | Maintained pure HNN and forced/damped HNN vector fields using a learned orthogonal Poisson frame, isotropic PSD damping, and time-only forcing. |
+| Method analysis | `method/analysis/semantic_latent_export.py` | Newly authored in ChatPathway2. | Exports the exact maintained graph-layer representation for revised Tasks 0 and 2. |
 | Method training prototype | `method/training/lejepa_pathway.py` | Newly authored in ChatPathway2, informed by the LeJEPA-style latent prediction paradigm but not copied from an external repository. | Lowest-priority exploratory pathway-language JEPA probe: prompt latent predicts answer latent with anti-collapse regularization. |
 | Method inference prototype | `method/inference/lejepa_pathway.py` | Newly authored in ChatPathway2 to pair with `method/training/lejepa_pathway.py`. | Lowest-priority non-generative latent scoring for the pathway LeJEPA probe. |
 | Method dynamics prototypes | `method/dynamics/latent_teacher.py`, `method/training/latent_dynamics_teacher.py`, `method/inference/latent_dynamics_rollout.py` | Newly authored in ChatPathway2. | Complete train/inference path for Neural ODE, encoder-conditioned Latent ODE, gradient-flow energy, GENERIC, Koopman, and SINDy latent dynamics teachers. |
@@ -37,6 +38,7 @@ project implementation.
 | Downstream Task VI evaluator | `downstream/tasks/task6_perturbed_cell/main.py` | Newly authored evaluator that reimplements the C2S rank-vector metrics from migrated legacy C2S scripts. | Current Task VI scoring entry point. |
 | Downstream Task VI generation | `downstream/tasks/task6_perturbed_cell/generation.py` | Newly authored wrapper around the migrated Qwen-C2S and Gemma server generation paths. | Maintained prediction JSONL generation entry point for Task VI. |
 | Downstream Tasks VII-IX | `downstream/tasks/task7_step_shuffling/`, `task8_directional_reranking/`, `task9_counterfactual/` | Newly authored evaluators based on downstream task specifications. | Runnable but not reportable without required corpora and labels. |
+| Revised downstream Task 0-6 suite | `downstream/new_tasks/**` | Newly authored after reconciling the source task PDF, current JSON schema, and model unit. | Maintained contracts/evaluators with explicit provenance and claim gates. |
 | Documentation | `README.md`, `method/README.md`, `downstream/README.md`, `docs/*.md`, `scripts/README.md` | Authored during ChatPathway2 setup and maintenance. | Workflow, storage, and provenance documentation. |
 | PHNN paper | `docs/Port-Hamiltonian Neural Networks for Learning Explicit Time-Dependent Dynamical Systems.pdf` | User-provided reference document. | Literature reference only; it is not implemented code. |
 
@@ -58,8 +60,9 @@ rows:
     hyperparameters while preserving the original training algorithm.
   - Writes `run_config.json` and `history.json` under the save directory.
   - Fixes ODE time-column construction for tensor-valued `torchdiffeq` times.
-  - Removes the `detach()` / `torch.no_grad()` break between HNN rollout and
-    `loss_align`, so the intended FrameworkA alignment loss can train HNN.
+  - Keeps the predicted rollout differentiable so alignment trains HNN and the
+    prompt-anchor LoRA path, while stop-gradient prevents the target layer
+    representation from moving toward its own prediction in the same update.
   - Uses the first answer token to find the prompt boundary, avoiding the old
     padding-label bug where short examples could start HNN rollout from a padded
     token.
@@ -78,16 +81,9 @@ rows:
 - `docs/INFERENCE_BEST_CKPT.md`
   - Records the current `method/inference/pathway.py` default base model,
     adapter, input, and output paths.
-- `method/training/framework_a_phnn.py`
-  - Copies the maintained FrameworkA training loop and replaces the forced/damped
-    HNN-style vector field with a controlled PHNN prototype.
-  - Uses prompt latent mean as the first external control input `u`; no new CSV
-    columns are required for this prototype.
-  - Adds argparse overrides, `run_config.json`, `history.json`, and the same
-    tensor-safe ODE time-column construction as FrameworkA.
 - `docs/PHNN_TRAINING_DESIGN.md`
-  - Documents the PHNN formula, `u` choices, current data contract, and training
-    chain.
+  - Records why the incorrect prompt-controlled prototype was removed and why a
+    future PHNN requires a separately defined port/control signal.
 - `method/training/lejepa_pathway.py` and `method/inference/lejepa_pathway.py`
   - Add a LeJEPA-style pathway-language exploration path at the method layer.
   - This is a latent prediction/scoring probe, not a text generation model.

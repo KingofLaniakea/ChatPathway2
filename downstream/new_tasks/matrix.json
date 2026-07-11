@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "suite": "chatpathway2_revised_downstream_tasks",
+  "phenotype_policy": "Missing phenotype annotations are excluded and counted; they are never converted to negative labels.",
+  "tasks": [
+    {
+      "id": "task0",
+      "name": "AE and Hamiltonian self-consistency",
+      "module": "downstream.new_tasks.task0_self_consistency",
+      "primary_input": "held-out hidden-state and latent-trajectory NPZ",
+      "metrics": ["AE MSE", "AE cosine", "rollout MSE@h", "rollout cosine@h"],
+      "model_dependency": ["base/SFT checkpoint", "AE checkpoint", "HNN or forced-damped-HNN checkpoint"],
+      "status": "evaluator_ready_export_required",
+      "claim_boundary": "Representation fit only; not biological causality or phenotype accuracy."
+    },
+    {
+      "id": "task1",
+      "name": "Substep Conditional Step Prediction",
+      "module": "downstream.new_tasks.task1_substep_csp",
+      "primary_input": "inference records with explicit remaining_substeps or conservatively parsed remaining_steps",
+      "metrics": ["next-layer atomic-event multiset F1", "source/relation/target match", "ordered layer F1", "optional provenance-gated ordered substep F1"],
+      "model_dependency": ["frozen prediction artifact"],
+      "status": "runnable; exact boundaries require a new JSON-to-CSV rebuild, while the current server full CSV is explicitly marked sentence_parser_v1",
+      "claim_boundary": "Ambiguous clauses are excluded; within-layer text order is not treated as causal without independent ordering provenance."
+    },
+    {
+      "id": "task2",
+      "name": "PCTE",
+      "module": "downstream.new_tasks.task2_pcte",
+      "primary_input": "paired predicted/gold latent trajectories plus fixed-representation manifest",
+      "metrics": ["DTW cosine PCTE", "DTW Euclidean PCTE"],
+      "model_dependency": ["same base/adapter/AE representation for both trajectories"],
+      "status": "evaluator_ready_export_required",
+      "claim_boundary": "Latent representation agreement; distinct from HNN rollout self-consistency."
+    },
+    {
+      "id": "task3",
+      "name": "Causal direction, shuffle, and unrelated reranking",
+      "module": "downstream.new_tasks.task3_causal_reranking",
+      "primary_input": "expert-validated candidate sets",
+      "metrics": ["Top-1", "MRR", "pairwise rejection by negative type"],
+      "model_dependency": ["LLM conditional scores", "optional validation-calibrated HNN diagnostics"],
+      "status": "evaluator_ready_candidate_annotation_required",
+      "claim_boundary": "No automatic energy-monotonicity or direction-as-time claim."
+    },
+    {
+      "id": "task4",
+      "name": "Knockout and rescue",
+      "module": "downstream.new_tasks.task4_knockout_rescue",
+      "primary_input": "experimentally evidenced interventions and calibrated phenotype probabilities",
+      "metrics": ["endpoint accuracy", "Brier", "KO effect direction", "rescue Hit@1/MRR"],
+      "model_dependency": ["prompt-conditioned inference or separately trained intervention-conditioned dynamics", "calibrated phenotype scorer"],
+      "status": "contract_and_evaluator_ready_external_data_and_scorer_required",
+      "claim_boundary": "Time-only F(t) is not intervention u; missing phenotype is not negative."
+    },
+    {
+      "id": "task5",
+      "name": "Perturbed-cell transfer",
+      "module": "downstream.new_tasks.task5_perturbed_cell_transfer",
+      "primary_input": "aligned control/observed/predicted cell-by-gene matrices",
+      "metrics": ["expression correlation", "delta correlation", "top-DE delta correlation"],
+      "model_dependency": ["explicit cell-representation adapter/post-training", "controlled baseline for pathway-prior claim"],
+      "status": "evaluator_ready_cell_adapter_and_artifacts_required",
+      "claim_boundary": "The pathway checkpoint is not directly AnnData/C2S-compatible."
+    },
+    {
+      "id": "task6",
+      "name": "BioMaze external benchmark",
+      "module": "downstream.new_tasks.task6_biomaze",
+      "primary_input": "official frozen BioMaze questions and model predictions",
+      "metrics": ["multiple-choice accuracy", "answer validity", "accuracy by tag"],
+      "model_dependency": ["frozen checkpoint prediction artifact"],
+      "status": "optional_evaluator_ready_official_dataset_required",
+      "claim_boundary": "Zero-shot status requires contamination audit and checkpoint chronology."
+    }
+  ]
+}

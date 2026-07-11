@@ -40,6 +40,17 @@ def validate_row(row: dict[str, Any]) -> list[str]:
     expected_dir = METHODS_DIR / str(experiment_id)
     if not expected_dir.is_dir():
         errors.append(f"{experiment_id}: missing directory {expected_dir}")
+    settings_path = expected_dir / "settings.json"
+    if not settings_path.is_file():
+        errors.append(f"{experiment_id}: missing settings file {settings_path}")
+    else:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        for field in ("a_dynamics", "b_ae", "d_training_schedule", "c_inference", "status"):
+            if settings.get(field) != row.get(field):
+                errors.append(
+                    f"{experiment_id}: settings.{field}={settings.get(field)!r} "
+                    f"does not match matrix value {row.get(field)!r}"
+                )
 
     for key, filename in (("train_module", "train.py"), ("infer_module", "infer.py")):
         module = row.get(key)

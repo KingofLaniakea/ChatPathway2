@@ -347,9 +347,9 @@ def item_mentions_phenotype(item: dict[str, Any]) -> bool:
     return any("phenotype" in str(item.get(field, "")).lower() for field in fields)
 
 
-def extract_phenotype(graph_data: Any) -> PhenotypeTarget:
+def extract_phenotype(graph_data: Any, *, source: str) -> PhenotypeTarget:
     if not isinstance(graph_data, dict):
-        return PhenotypeTarget()
+        return PhenotypeTarget(source=source)
 
     texts: list[str] = []
     metadata = graph_data.get("metadata")
@@ -372,17 +372,22 @@ def extract_phenotype(graph_data: Any) -> PhenotypeTarget:
 
     unique = unique_nonempty(texts)
     if not unique:
-        return PhenotypeTarget()
+        return PhenotypeTarget(source=source)
     return PhenotypeTarget(
         text="; ".join(unique),
         status="available",
-        source="processed_graph",
+        source=source,
     )
 
 
-def extract_graph_fields(graph_data: Any) -> tuple[str, str, str, PhenotypeTarget]:
+def extract_graph_fields(
+    graph_data: Any,
+    *,
+    block_name: str,
+    allow_file_level_phenotype: bool,
+) -> tuple[str, str, str, PhenotypeTarget]:
     if not isinstance(graph_data, dict):
-        return "", "", "", PhenotypeTarget()
+        return "", "", "", PhenotypeTarget(source="processed_graph")
 
     metadata = graph_data.get("metadata")
     if not isinstance(metadata, dict):
@@ -410,7 +415,62 @@ def extract_graph_fields(graph_data: Any) -> tuple[str, str, str, PhenotypeTarge
         graph_data.get("pathway_title"),
         graph_data.get("description"),
     )
-    return organism, pathway_id, pathway_title, extract_phenotype(graph_data)
+    block_data = graph_data.get(block_name)
+    block_level = (
+        extract_phenotype(block_data, source="processed_graph_block")
+        if isinstance(block_data, dict)
+        else PhenotypeTarget(source="processed_graph_block")
+    )
+    file_level = extract_phenotype(graph_data, source="processed_graph_file")
+    if block_level.has_target:
+        # For a single-block file both scopes identify the same biological
+        # record, so retain agreement and surface disagreement explicitly.
+        phenotype = (
+            merge_phenotype_targets(block_level, file_level)
+            if allow_file_level_phenotype and file_level.has_target
+            else block_level
+        )
+    elif file_level.has_target and not allow_file_level_phenotype:
+        # Never copy one file-level label onto every block in a multi-block
+        # file.  Keep the ambiguity visible for audits and eligibility masks.
+        phenotype = PhenotypeTarget(
+            status="ambiguous_file_level",
+            source="processed_graph_file",
+        )
+    else:
+        phenotype = file_level if file_level.has_target else block_level
+    return organism, pathway_id, pathway_title, phenotype
+
+
+def merge_phenotype_targets(
+    processed: PhenotypeTarget,
+    graph: PhenotypeTarget,
+) -> PhenotypeTarget:
+    """Merge only explicit block-level annotations without hiding conflicts."""
+
+    if processed.has_target and graph.has_target:
+        left = " ".join((processed.text or "").split()).casefold()
+        right = " ".join((graph.text or "").split()).casefold()
+        if left == right:
+            return PhenotypeTarget(
+                text=processed.text,
+                status="available",
+                source="processed_json+processed_graph",
+            )
+        return PhenotypeTarget(
+            status="conflict",
+            source="processed_json+processed_graph",
+        )
+    if processed.has_target:
+        return processed
+    if graph.has_target:
+        return graph
+    if graph.status in {"source_error", "ambiguous_file_level", "conflict"}:
+        return graph
+    sources = "+".join(
+        source for source in (processed.source, graph.source) if source
+    )
+    return PhenotypeTarget(status="not_annotated", source=sources)
 
 
 def default_organism(processed_file: Path, processed_root: Path) -> str:
@@ -429,6 +489,7 @@ def make_record(
     processed_graph_root: Path,
     block_name: str,
     layer_map: dict[str, Any],
+    allow_file_level_phenotype: bool,
 ) -> PathwayRecord:
     graph_file = find_processed_graph_file(
         processed_file,
@@ -438,17 +499,28 @@ def make_record(
     graph_organism = ""
     graph_pathway_id = ""
     graph_title = ""
-    phenotype = PhenotypeTarget()
+    processed_phenotype = extract_phenotype(layer_map, source="processed_json")
+    graph_phenotype = PhenotypeTarget(source="")
     if graph_file is not None:
         try:
-            graph_organism, graph_pathway_id, graph_title, phenotype = (
-                extract_graph_fields(load_json(graph_file))
+            graph_organism, graph_pathway_id, graph_title, graph_phenotype = (
+                extract_graph_fields(
+                    load_json(graph_file),
+                    block_name=block_name,
+                    allow_file_level_phenotype=allow_file_level_phenotype,
+                )
             )
         except (OSError, json.JSONDecodeError) as exc:
             print(
                 f"warning: failed to read processed_graph {graph_file}: {exc}",
                 file=sys.stderr,
             )
+            graph_phenotype = PhenotypeTarget(
+                status="source_error",
+                source="processed_graph",
+            )
+
+    phenotype = merge_phenotype_targets(processed_phenotype, graph_phenotype)
 
     block_number = parse_pathway_block_number(block_name)
     return PathwayRecord(
@@ -502,8 +574,9 @@ def iter_examples(
             print(f"warning: failed to read {processed_file}: {exc}", file=sys.stderr)
             continue
 
+        blocks = list(iter_pathway_blocks(data))
         block_count = 0
-        for block_name, layer_map in iter_pathway_blocks(data):
+        for block_name, layer_map in blocks:
             block_count += 1
             stats["pathway_blocks"] += 1
             record = make_record(
@@ -512,6 +585,7 @@ def iter_examples(
                 processed_graph_root,
                 block_name,
                 layer_map,
+                allow_file_level_phenotype=len(blocks) == 1,
             )
             if len(record.steps) < min_steps:
                 stats["skipped_short_blocks"] += 1
@@ -523,6 +597,7 @@ def iter_examples(
                 stats["blocks_with_phenotype"] += 1
             else:
                 stats["blocks_without_phenotype"] += 1
+            stats[f"phenotype_status_{record.phenotype.status}"] += 1
 
             for prefix_len in prefix_lengths(len(record.steps), include_empty_prefix):
                 if max_rows and row_count >= max_rows:
@@ -604,10 +679,14 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     test_organisms = parse_organism_set(args.test_organisms)
     stats: Counter = Counter()
+    temporary_outputs = {
+        label: path.with_suffix(path.suffix + ".tmp")
+        for label, path in outputs.items()
+    }
 
     with ExitStack() as stack:
         writers: dict[str, csv.DictWriter] = {}
-        for label, path in outputs.items():
+        for label, path in temporary_outputs.items():
             handle = stack.enter_context(path.open("w", encoding="utf-8", newline=""))
             writer = csv.DictWriter(handle, fieldnames=CSV_FIELDNAMES)
             writer.writeheader()
@@ -638,6 +717,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             if split in writers:
                 writers[split].writerow(row)
                 stats[f"{split}_rows"] += 1
+
+    # Keep any previous full CSV intact until every new stream has closed
+    # successfully. A failed build leaves only explicit .tmp files to inspect.
+    for label, temporary in temporary_outputs.items():
+        temporary.replace(outputs[label])
 
     summary = {
         "processed_root": str(processed_root),

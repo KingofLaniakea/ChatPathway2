@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+
+csv.field_size_limit(sys.maxsize)
 
 
 def load_records(path: str | Path) -> list[dict[str, Any]]:

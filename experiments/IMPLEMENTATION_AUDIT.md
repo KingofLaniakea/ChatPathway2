@@ -1,64 +1,31 @@
-# Experiment Implementation Audit
+# Implementation readiness audit
 
-This audit records the local code-completion boundary for the experiment
-wrappers. GPU training on real assets remains a server validation step.
+This file distinguishes code readiness from completed scientific results.
 
-## Current Evidence
-
-| Requirement | Evidence | Status |
-| --- | --- | --- |
-| Combination matrix uses abcd layer columns | `experiments/EXPERIMENT_MATRIX.csv`, `experiments/matrix.json` | Implemented |
-| Current training+inference pipeline is represented as one row | `exp001_hnn_reconae_joint_direct` | Implemented |
-| AE is an explicit layer | `b_ae` column and `b0/b1/b2` choices | Implemented in matrix; only `b0` runnable |
-| DDP is not a main comparison | no DDP row in `implemented` | Implemented |
-| FrameworkA naming removed from experiment IDs | main row is `exp001_hnn_reconae_joint_direct` | Implemented |
-| Inference layer has direct/rerank/FrameworkB options | `c0/c1/c2` in matrix | Implemented in design; `c2` planned |
-| Full train wrappers run from scratch | implemented `train.py` wrappers call SFT and later stages in order | Implemented structurally |
-| Runtime paths separated from design matrix | `runtime_manifest.json` | Implemented |
-
-## Runnable Rows
-
-| Row | Train chain | Infer chain |
-| --- | --- | --- |
-| `exp000_sft_only_direct` | `method.training.sft` | `method.inference.pathway` |
-| `exp001_hnn_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.framework_a` | `method.inference.pathway` |
-| `exp002_phnn_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.framework_a_phnn` | `method.inference.pathway` |
-| `exp003_neuralode_reconae_teacher_direct` | `method.training.sft -> method.training.latent_ae -> method.training.latent_dynamics_teacher -> method.training.dynamics_distilled_lora` | `method.inference.pathway` |
-| `exp004_neuralode_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.joint_lora_dynamics --variant neural_ode` | `method.inference.pathway` |
-| `exp005_gradientflow_reconae_joint_direct` | `method.training.sft -> method.training.latent_ae -> method.training.joint_lora_dynamics --variant gradient_flow` | `method.inference.pathway` |
-| `exp010_neuralode_reconae_teacher_rerank_partial` | `method.training.sft -> method.training.latent_ae -> method.training.latent_dynamics_teacher` | `method.inference.rollout_rerank` |
-| `x001_c2s_transfer_after_model_selection` | `scripts.c2s.train.train_c2s_single` | `downstream.tasks.task6_perturbed_cell.generation` |
-| `z001_lejepa_speculative_probe` | `method.training.lejepa_pathway` | `method.inference.lejepa_pathway` |
-
-`exp010` is intentionally marked partial: the reranker exists, but the
-multi-answer candidate generation step required by `c1_multi_answer_rerank` is
-not implemented yet.
-
-## Planned Rows
-
-| Row | Missing implementation |
+| Requirement | Implemented evidence |
 | --- | --- |
-| `plan001_hnn_reconae_teacher_direct` | standalone HNN teacher training plus distillation |
-| `plan002_phnn_reconae_teacher_direct` | standalone PHNN teacher training plus distillation |
-| `plan003_hnn_dynamicsawareae_joint_direct` | dynamics-aware AE objective |
-| `plan004_hnn_jointae_joint_direct` | joint AE+dynamics training |
-| `plan005_hnn_reconae_joint_rerank` | multi-answer generation and HNN-compatible rerank |
-| `plan006_hnn_reconae_joint_frameworkb` | FrameworkB latent weighted-average inference |
+| stable multi-step JSON and identities | `dataprocess/schemas.py`, `audit_pathway_csv.py` |
+| block-safe phenotype handling | block/file conflict and ambiguity statuses in `build_pathway_csv.py` |
+| record-balanced pilot and held-out evals | `prepare_experiment_data.py` |
+| graph-layer atomic-span targets | `method/training/sequence.py`, `framework_a.py` |
+| no arbitrary q/p split | orthogonal Poisson `J=Q^T J0 Q` |
+| correct forced/damped form | `(J-rI) grad H + F(t)`, zero-init time-only force |
+| attribution control | `exp003_stage2_sft_only_direct` |
+| reproducibility/model selection | seeds, group validation, early stop, best checkpoint, hashes/logs |
+| three-seed isolation | `seeded_asset_path()` and seed-scoped runtime manifest |
+| direct inference diagnostics | preserved identities, token/finish reason, JSON/schema validity |
+| revised downstream suite | `downstream/new_tasks` Task 0-6 and semantic exporter |
 
-## Local Verification
+Executable rows are `base000`, `exp000`, `exp003`, `exp001`, and `exp002`.
+There is no executable `exp011`-`exp014`: the previous prototype advanced a
+graph-layer vector field per token and was removed.
 
-Run from repository root:
+Before reporting any model result, the server must still complete a real
+Qwen-tokenizer/GPU smoke, then the three-seed runs. Task 3 needs reviewed hard
+negatives; Task 4 needs intervention evidence and a calibrated phenotype
+scorer; Task 5 needs aligned cell artifacts; Task 6 needs the official external
+benchmark and contamination audit.
 
-```bash
-python -m experiments.validate_matrix
-python -m experiments.run_experiment audit --phase both --quiet
-python -m experiments.run_experiment consistency --phase both --quiet
-python -m experiments.run_experiment run-all --phase train --dry-run
-python -m experiments.run_experiment run-all --phase infer --dry-run
-python -m compileall -q method experiments
-git diff --check
-```
-
-These checks validate wrapper structure, path consistency, argparse
-compatibility, and Python syntax. They do not prove GPU memory, model asset
-availability, or real benchmark quality.
+The trainer saves per-epoch adapters/dynamics and can warm-start an adapter, but
+does not yet provide exact optimizer/scheduler/RNG resume. A killed run should
+be treated as a restarted replicate unless exact resume is added.
