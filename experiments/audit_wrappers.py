@@ -27,9 +27,16 @@ def module_command(module: str) -> list[str]:
     return [sys.executable, "-m", module]
 
 
-def audit_module(module: str, phase: str, experiment_id: str) -> dict[str, Any]:
+def audit_module(
+    module: str,
+    phase: str,
+    experiment_id: str,
+    *,
+    env_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
     env = os.environ.copy()
     env["CHATPATHWAY_LAUNCH_DRY_RUN"] = "1"
+    env.update(env_overrides or {})
     result = subprocess.run(
         module_command(module),
         cwd=Path.cwd(),

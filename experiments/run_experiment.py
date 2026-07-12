@@ -264,6 +264,8 @@ def main() -> None:
     consistency = sub.add_parser("consistency", help="Audit wrapper dry-run commands against runtime_manifest.json paths.")
     consistency.add_argument("--phase", choices=("train", "infer", "both"), default="both")
     consistency.add_argument("--ids", help="Comma-separated experiment ids to audit.")
+    consistency.add_argument("--asset-root", help="Temporarily override the runtime asset root.")
+    consistency.add_argument("--profile", help="Runtime profile name from chatpathway.config.json.")
     consistency.add_argument("--jsonl", help="Optional JSONL output path.")
     consistency.add_argument("--quiet", action="store_true")
 
@@ -384,6 +386,10 @@ def main() -> None:
         command = [sys.executable, "-m", "experiments.audit_matrix_consistency", "--phase", args.phase]
         if args.ids:
             command.extend(["--ids", args.ids])
+        if args.asset_root:
+            command.extend(["--asset-root", args.asset_root])
+        if args.profile:
+            command.extend(["--profile", args.profile])
         if args.jsonl:
             command.extend(["--jsonl", args.jsonl])
         if args.quiet:

@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from experiments.audit_wrappers import audit_module
+from experiments.check_runtime_assets import rewrite_asset_path
+from experiments.runtime_config import asset_root as configured_asset_root
 
 
 MATRIX_PATH = Path(__file__).with_name("matrix.json")
@@ -138,6 +140,49 @@ def phase_requirements(entry: dict[str, Any], phase: str) -> list[str]:
     return list(entry.get(f"{phase}_requires", entry.get("requires", [])))
 
 
+PATH_FIELDS = {
+    "requires",
+    "train_requires",
+    "infer_requires",
+    "train_outputs",
+    "infer_artifacts",
+    "infer_outputs",
+}
+
+
+def remap_manifest_rows(
+    rows: dict[str, Any],
+    *,
+    manifest_root: str,
+    target_root: str,
+) -> dict[str, Any]:
+    """Resolve static manifest paths into the profile used by the wrappers.
+
+    ``runtime_manifest.json`` is committed with the canonical AutoDL root, but
+    wrapper dry-runs resolve paths from the active runtime profile.  Auditing a
+    CFFF wrapper against unreplaced AutoDL strings produces false failures.
+    Dependency row ids must remain ids, while declared filesystem paths are
+    rewritten exactly as the runtime asset checker rewrites them.
+    """
+
+    row_ids = set(rows)
+    remapped: dict[str, Any] = {}
+    for row_id, entry in rows.items():
+        output = dict(entry)
+        for field in PATH_FIELDS:
+            values = entry.get(field)
+            if values is None:
+                continue
+            output[field] = [
+                value
+                if value in row_ids
+                else str(rewrite_asset_path(value, manifest_root, target_root))
+                for value in values
+            ]
+        remapped[row_id] = output
+    return remapped
+
+
 def train_output_anchors(path: str, asset_root: str) -> list[str]:
     """Return acceptable command anchors for a train output path.
 
@@ -248,6 +293,7 @@ def audit_row(
     manifest_rows: dict[str, Any],
     row_ids: set[str],
     asset_root: str,
+    env_overrides: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     entry = manifest_rows.get(row["id"])
@@ -268,7 +314,12 @@ def audit_row(
         phases.append(("infer", row["infer_module"]))
 
     for concrete_phase, module in phases:
-        wrapper_record = audit_module(module, concrete_phase, row["id"])
+        wrapper_record = audit_module(
+            module,
+            concrete_phase,
+            row["id"],
+            env_overrides=env_overrides,
+        )
         tokens = command_tokens(wrapper_record["inner_command"])
         target_module, target_args = command_parts(wrapper_record["inner_command"])
         records.append({
@@ -357,6 +408,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--phase", choices=("train", "infer", "both"), default="both")
     parser.add_argument("--ids", help="Comma-separated experiment ids to audit.")
+    parser.add_argument("--asset-root", help="Temporarily override the runtime asset root.")
+    parser.add_argument("--profile", help="Runtime profile name from chatpathway.config.json.")
     parser.add_argument("--jsonl", help="Optional JSONL output path.")
     parser.add_argument("--quiet", action="store_true")
     return parser.parse_args()
@@ -366,9 +419,19 @@ def main() -> None:
     args = parse_args()
     matrix = load_json(MATRIX_PATH)
     manifest = load_json(RUNTIME_MANIFEST_PATH)
-    manifest_rows = manifest.get("rows", {})
+    manifest_root = manifest.get("asset_root", "/root/autodl-tmp")
+    target_root = args.asset_root or str(configured_asset_root(args.profile))
+    manifest_rows = remap_manifest_rows(
+        manifest.get("rows", {}),
+        manifest_root=manifest_root,
+        target_root=target_root,
+    )
     row_ids = set(manifest_rows)
-    asset_root = manifest.get("asset_root", "/root/autodl-tmp")
+    env_overrides: dict[str, str] = {}
+    if args.profile:
+        env_overrides["CHATPATHWAY_PROFILE"] = args.profile
+    if args.asset_root:
+        env_overrides["CHATPATHWAY_ASSET_ROOT"] = args.asset_root
 
     records: list[dict[str, Any]] = []
     for row in selected_rows(matrix, args.ids):
@@ -378,7 +441,8 @@ def main() -> None:
                 phase=args.phase,
                 manifest_rows=manifest_rows,
                 row_ids=row_ids,
-                asset_root=asset_root,
+                asset_root=target_root,
+                env_overrides=env_overrides,
             )
         )
 
