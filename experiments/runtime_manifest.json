@@ -17,6 +17,7 @@
       ],
       "train_outputs": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_artifacts": [
@@ -25,6 +26,7 @@
       ],
       "infer_outputs": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "runtime_notes": "Default manifest seed is 20260711. Train once per seed; CFFF uses four-process DDP for SFT and one GPU for AE."
