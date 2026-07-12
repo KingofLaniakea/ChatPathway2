@@ -28,6 +28,13 @@ Within one seed, `exp003`, `exp001`, and `exp002` reuse exactly that seed's
 shared SFT and AE. Recommended seeds are `20260711`, `20260712`, and
 `20260713`.
 
+The controlled matrix pins `max_length=8192` and per-process training
+`batch_size=1` for SFT, AE, and every stage-2 arm. On the prepared CFFF pilot,
+this retains 99.17% of graph-layer targets and 91.07% of substeps; 31 of 17,416
+rows have no complete semantic layer inside the text budget and therefore
+contribute CE but no dynamics loss. Truncation counters remain mandatory
+reported metrics.
+
 ## CFFF preparation
 
 ```bash

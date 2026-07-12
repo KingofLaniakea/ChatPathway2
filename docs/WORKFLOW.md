@@ -44,12 +44,17 @@ used by SFT, AE, and stage 2 before launching the matrix:
 python -m dataprocess.audit_token_budget \
   --input "$BASE/data/train_kegg_pathway_pilot.csv" \
   --base-model "$BASE/models/qwen3_8B" \
-  --output "$BASE/artifacts/dataset/pilot_token_budget_1072.json"
+  --max-length 8192 \
+  --output "$BASE/artifacts/dataset/pilot_token_budget_8192.json"
 ```
 
 Text-budget truncation is distinct from the 128-step ODE cap and is reported
 separately. A row with zero retained semantic layers still contributes SFT, but
 not a dynamics alignment target.
+
+The maintained matrix fixes `max_length=8192` and per-process training
+`batch_size=1`. This setting was smoke-tested through four-GPU SFT, AE, HNN,
+and forced/damped HNN on A100-80GB; do not silently lower it for one arm.
 
 ## 2. Download the pinned base model
 
@@ -107,7 +112,8 @@ python -m method.analysis.semantic_latent_export \
   --input "$BASE/data/test_kegg_pathway_eval.csv" \
   --output "$BASE/artifacts/task0/self_consistency.npz" \
   --manifest-output "$BASE/artifacts/task0/manifest.json" \
-  --dataset-id kegg_test_organisms_v1 \
+  --dataset-id kegg_family_disjoint_core_v2 \
+  --max-length 8192 \
   --base-model "$BASE/models/qwen3_8B" \
   --adapter "$BASE/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best" \
   --ae-checkpoint "$BASE/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt" \

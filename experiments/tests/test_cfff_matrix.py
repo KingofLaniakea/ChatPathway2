@@ -22,6 +22,10 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             ("11:exp001_hnn_reconae_joint_direct:train",),
         )
         self.assertIn("torch.distributed.run", by_key["11:sft"].command)
+        for key in ("11:sft", "11:ae"):
+            command = by_key[key].command
+            self.assertEqual(command[command.index("--max-length") + 1], "8192")
+            self.assertEqual(command[command.index("--batch-size") + 1], "1")
 
     def test_dry_run_does_not_require_runtime_assets(self) -> None:
         jobs = build_jobs([11], Path("/missing"), "/python")

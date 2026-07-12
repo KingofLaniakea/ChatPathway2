@@ -1,12 +1,18 @@
 """Direct greedy inference for the compute-matched stage-2 SFT control."""
 
-from experiments._launch import asset_path, run_module, seeded_asset_path
+from experiments._launch import (
+    asset_path,
+    controlled_inference_budget_args,
+    run_module,
+    seeded_asset_path,
+)
 
 
 if __name__ == "__main__":
     run_module(
         "method.inference.pathway",
         [
+            *controlled_inference_budget_args(),
             "--base-model", asset_path("models/qwen3_8B"),
             "--adapter", seeded_asset_path("checkpoints/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best"),
             "--input", asset_path("data/test_kegg_pathway_eval.csv"),

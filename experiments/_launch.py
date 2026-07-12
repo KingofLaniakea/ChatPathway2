@@ -13,6 +13,25 @@ from experiments.runtime_config import active_profile, asset_path
 
 
 DEFAULT_EXPERIMENT_SEED = "20260711"
+CONTROLLED_MAX_LENGTH = "8192"
+CONTROLLED_TRAIN_BATCH_SIZE = "1"
+
+
+def controlled_training_budget_args() -> list[str]:
+    """Sequence settings shared by SFT, AE, and every stage-2 arm."""
+
+    return [
+        "--max-length",
+        CONTROLLED_MAX_LENGTH,
+        "--batch-size",
+        CONTROLLED_TRAIN_BATCH_SIZE,
+    ]
+
+
+def controlled_inference_budget_args() -> list[str]:
+    """Prompt budget paired with the controlled training matrix."""
+
+    return ["--max-length", CONTROLLED_MAX_LENGTH]
 
 
 def _command_string(command: list[str]) -> str:

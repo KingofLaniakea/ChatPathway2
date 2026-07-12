@@ -90,6 +90,7 @@ python -m method.analysis.semantic_latent_export \
   --ae-checkpoint /path/to/ae_proj.pt \
   --dynamics-checkpoint /path/to/hamiltonian_dynamics.pt \
   --dataset-id heldout_pathway_v1 \
+  --max-length 8192 \
   --include-reconstruction-states
 ```
 
@@ -193,6 +194,7 @@ python -m downstream.new_tasks.task3_causal_reranking \
   --input /path/to/expert_candidates.jsonl \
   --base-model /path/to/base_model \
   --adapter /path/to/checkpoint_best \
+  --max-length 8192 \
   --calibration /path/to/validation_calibration.json \
   --output-dir /path/to/results/task3
 ```

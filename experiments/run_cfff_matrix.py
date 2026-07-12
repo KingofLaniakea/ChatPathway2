@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from experiments._launch import controlled_training_budget_args
 from experiments.runtime_config import asset_root
 
 
@@ -103,6 +104,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                     "4",
                     "-m",
                     "method.training.sft",
+                    *controlled_training_budget_args(),
                     "--base-model",
                     str(model),
                     "--train",
@@ -128,6 +130,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                     python,
                     "-m",
                     "method.training.latent_ae",
+                    *controlled_training_budget_args(),
                     "--base-model",
                     str(model),
                     "--sft-lora",

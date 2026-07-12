@@ -14,6 +14,7 @@ This file distinguishes code readiness from completed scientific results.
 | reproducibility/model selection | seeds, group validation, early stop, best checkpoint, hashes/logs |
 | three-seed isolation | `seeded_asset_path()` and seed-scoped runtime manifest |
 | direct inference diagnostics | preserved identities, token/finish reason, JSON/schema validity |
+| sequence-budget coverage | 8192-token matrix setting plus `dataprocess.audit_token_budget`; 99.17% layer and 91.07% substep retention on the prepared pilot |
 | revised downstream suite | `downstream/new_tasks` Task 0-6 and semantic exporter |
 
 Executable rows are `base000`, `exp000`, `exp003`, `exp001`, and `exp002`.

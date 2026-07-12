@@ -1,6 +1,11 @@
 """Run the exact joint-stage pipeline with every dynamics loss disabled."""
 
-from experiments._launch import asset_path, run_steps, seeded_asset_path
+from experiments._launch import (
+    asset_path,
+    controlled_training_budget_args,
+    run_steps,
+    seeded_asset_path,
+)
 
 
 if __name__ == "__main__":
@@ -8,6 +13,7 @@ if __name__ == "__main__":
         (
             "method.training.framework_a",
             [
+                *controlled_training_budget_args(),
                 "--variant", "hnn",
                 "--structure-mode", "orthogonal_poisson",
                 "--damping-mode", "isotropic",
