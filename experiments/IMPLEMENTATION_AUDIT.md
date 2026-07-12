@@ -11,7 +11,7 @@ This file distinguishes code readiness from completed scientific results.
 | no arbitrary q/p split | orthogonal Poisson `J=Q^T J0 Q` |
 | correct forced/damped form | `(J-rI) grad H + F(t)`, zero-init time-only force |
 | attribution control | `exp003_stage2_sft_only_direct` |
-| reproducibility/model selection | seeds, group validation, early stop, best checkpoint, hashes/logs |
+| reproducibility/model selection | seeds, pathway-family-group validation, early stop, best checkpoint, hashes/logs |
 | three-seed isolation | `seeded_asset_path()` and seed-scoped runtime manifest |
 | direct inference diagnostics | preserved identities, token/finish reason, JSON/schema validity |
 | sequence-budget coverage | 8192-token matrix setting plus `dataprocess.audit_token_budget`; 99.17% layer and 91.07% substep retention on the prepared pilot |

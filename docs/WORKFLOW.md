@@ -72,7 +72,7 @@ training provenance.
 Use a disposable seed or explicit disposable output directories. The smoke
 must cover one SFT forward/backward, AE save/load, HNN and forced/damped RK4
 backward, checkpoint reload, and direct generation. `--limit` must contain at
-least two source groups.
+least two pathway-family groups.
 
 ```bash
 python -m experiments.run_experiment train base000_shared_sft_reconae -- \
@@ -97,9 +97,11 @@ single-GPU AE, stage-2 arms, and inference jobs across the four devices. Thus
 the node is kept busy without pretending that AE/HNN themselves are currently
 four-way distributed.
 
-Validation is a deterministic `source_json` group split. Checkpoint selection
-uses validation loss with early stopping. Every run records config, Git commit,
-base revision, SFT/AE digests, data digest, metrics JSONL, and truncation counts.
+Validation is a deterministic `pathway_family_id` group split, so a family used
+for checkpoint selection is absent from that seed's optimization rows. The same
+split is reused by SFT, AE, and every stage-2 arm. Checkpoint selection uses
+validation loss with early stopping. Every run records config, Git commit, base
+revision, SFT/AE digests, data digest, metrics JSONL, and truncation counts.
 
 ## 5. Revised downstream tasks
 

@@ -22,6 +22,8 @@ Within that tree, the three stage-2 arms share the same SFT/AE artifacts, data,
 seed, epoch schedule, validation grouping, and LoRA optimizer settings.
 SFT, AE, and all three stage-2 arms also share the explicit 8192-token budget
 and per-process batch size 1; direct inference uses the same prompt budget.
+Validation holds out entire `pathway_family_id` groups and the same seed-keyed
+family split is reused by SFT, AE, and all stage-2 arms.
 
 The matrix does not contain token-level rollout/mixed inference. Dynamics is
 trained at graph-layer resolution, so advancing it per generated token would

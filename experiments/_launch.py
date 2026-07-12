@@ -15,6 +15,7 @@ from experiments.runtime_config import active_profile, asset_path
 DEFAULT_EXPERIMENT_SEED = "20260711"
 CONTROLLED_MAX_LENGTH = "8192"
 CONTROLLED_TRAIN_BATCH_SIZE = "1"
+CONTROLLED_VALIDATION_GROUP_COLUMN = "pathway_family_id"
 
 
 def controlled_training_budget_args() -> list[str]:
@@ -25,6 +26,8 @@ def controlled_training_budget_args() -> list[str]:
         CONTROLLED_MAX_LENGTH,
         "--batch-size",
         CONTROLLED_TRAIN_BATCH_SIZE,
+        "--validation-group-column",
+        CONTROLLED_VALIDATION_GROUP_COLUMN,
     ]
 
 

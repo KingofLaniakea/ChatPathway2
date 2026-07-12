@@ -26,6 +26,10 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             command = by_key[key].command
             self.assertEqual(command[command.index("--max-length") + 1], "8192")
             self.assertEqual(command[command.index("--batch-size") + 1], "1")
+            self.assertEqual(
+                command[command.index("--validation-group-column") + 1],
+                "pathway_family_id",
+            )
 
     def test_dry_run_does_not_require_runtime_assets(self) -> None:
         jobs = build_jobs([11], Path("/missing"), "/python")

@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12b",
+  "version": "2026-07-12c",
   "purpose": "Direct-inference controlled benchmark on a record-balanced, pathway-family-disjoint KEGG pilot. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
   "dataset_profile": {
     "name": "pilot_record_balanced_family_disjoint_v2",
@@ -22,6 +22,12 @@
     "measured_train_substep_retention": 0.910670531076294,
     "measured_rows_with_zero_retained_semantic_steps": 31,
     "measurement_artifact": "artifacts/dataset/pilot_token_budget_8192.json"
+  },
+  "validation_policy": {
+    "group_column": "pathway_family_id",
+    "fraction": 0.05,
+    "selection": "deterministic seed-keyed family split reused by SFT, AE, and every stage-2 arm",
+    "reason": "checkpoint selection is aligned with the unseen-pathway-family core test rather than in-family source holdout"
   },
   "artifact_scope": "checkpoints/seeds/<seed>/... and runs/seeds/<seed>/...; within a seed all stage-2 arms reuse that seed's shared SFT and AE",
   "axis_taxonomy": {

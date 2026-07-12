@@ -35,6 +35,11 @@ rows have no complete semantic layer inside the text budget and therefore
 contribute CE but no dynamics loss. Truncation counters remain mandatory
 reported metrics.
 
+Checkpoint selection uses a deterministic `pathway_family_id` validation split,
+not a row or source-only split. For seeds `20260711/12/13`, validation contains
+16/18/17 entire families respectively and has zero family overlap with that
+seed's optimization rows. SFT, AE, and all stage-2 arms reuse the same split.
+
 ## CFFF preparation
 
 ```bash
@@ -85,8 +90,8 @@ selects a different artifact tree; it does not change the prepared pilot rows.
 
 ## Smoke and audits
 
-Use at least two `source_json` groups when passing `--limit`, because validation
-is group-safe.
+Use at least two `pathway_family_id` groups when passing `--limit`, because
+validation is family-group-safe.
 
 ```bash
 python -m experiments.validate_matrix
