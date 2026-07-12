@@ -5,6 +5,7 @@ Run from the `ChatPathway2` repository root. On CFFF:
 ```bash
 source /cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui/codex-env.sh
 export CHATPATHWAY_PROFILE=cfff
+BASE=/cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui
 ```
 
 The profile resolves assets below
@@ -35,6 +36,20 @@ The command fails if schema/identity checks fail or a source, record, sample, or
 pathway family crosses the strict train/test boundary. Exact `source_items` are
 preserved by the new JSON builder; the already-generated full CSV can only be
 marked `sentence_parser_v1`.
+
+Measure the exact semantic-layer/substep retention under the same token budget
+used by SFT, AE, and stage 2 before launching the matrix:
+
+```bash
+python -m dataprocess.audit_token_budget \
+  --input "$BASE/data/train_kegg_pathway_pilot.csv" \
+  --base-model "$BASE/models/qwen3_8B" \
+  --output "$BASE/artifacts/dataset/pilot_token_budget_1072.json"
+```
+
+Text-budget truncation is distinct from the 128-step ODE cap and is reported
+separately. A row with zero retained semantic layers still contributes SFT, but
+not a dynamics alignment target.
 
 ## 2. Download the pinned base model
 
