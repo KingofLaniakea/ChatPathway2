@@ -14,9 +14,17 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from dataprocess.schemas import CSV_FIELDNAMES, QUESTION_TYPE
+    from dataprocess.schemas import (
+        CSV_FIELDNAMES,
+        QUESTION_TYPE,
+        canonical_pathway_family_id,
+    )
 except ImportError:  # Allows: python dataprocess/audit_pathway_csv.py
-    from schemas import CSV_FIELDNAMES, QUESTION_TYPE  # type: ignore
+    from schemas import (  # type: ignore
+        CSV_FIELDNAMES,
+        QUESTION_TYPE,
+        canonical_pathway_family_id,
+    )
 
 
 NULL_PHENOTYPE_STATUSES = {
@@ -36,6 +44,7 @@ class FileAudit:
     sources: set[str] = field(default_factory=set, repr=False)
     records: set[str] = field(default_factory=set, repr=False)
     samples: set[str] = field(default_factory=set, repr=False)
+    pathway_families: set[str] = field(default_factory=set, repr=False)
     organisms: Counter[str] = field(default_factory=Counter)
     phenotype_statuses: Counter[str] = field(default_factory=Counter)
     target_step_counts: Counter[int] = field(default_factory=Counter)
@@ -55,6 +64,7 @@ class FileAudit:
             "unique_sources": len(self.sources),
             "unique_records": len(self.records),
             "unique_samples": len(self.samples),
+            "unique_pathway_families": len(self.pathway_families),
             "organisms": dict(self.organisms.most_common()),
             "phenotype_statuses": dict(self.phenotype_statuses.most_common()),
             "target_step_counts": {str(key): value for key, value in sorted(self.target_step_counts.items())},
@@ -183,6 +193,12 @@ def audit_file(path: Path, max_errors: int) -> FileAudit:
                 prefix_count = parse_int(row.get("prefix_step_count", ""), "prefix_step_count")
                 if sample != f"{record}:prefix={prefix_count}":
                     raise ValueError("sample_id does not match record_id and prefix_step_count")
+                pathway_family = row.get("pathway_family_id", "").strip()
+                expected_family = canonical_pathway_family_id(row.get("pathway_id", ""))
+                if pathway_family != expected_family:
+                    raise ValueError(
+                        "pathway_family_id does not match the canonical KEGG pathway family"
+                    )
                 if sample in audit.samples:
                     raise ValueError(f"duplicate sample_id {sample}")
                 target_steps, status = validate_answer(row)
@@ -196,6 +212,7 @@ def audit_file(path: Path, max_errors: int) -> FileAudit:
                 audit.sources.add(source)
                 audit.records.add(record)
                 audit.samples.add(sample)
+                audit.pathway_families.add(pathway_family)
                 audit.organisms[row.get("organism", "").strip() or "<missing>"] += 1
                 audit.phenotype_statuses[status] += 1
                 audit.target_step_counts[target_steps] += 1
@@ -219,6 +236,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test", required=True)
     parser.add_argument("--report")
     parser.add_argument("--max-errors", type=int, default=100)
+    parser.add_argument(
+        "--allow-pathway-family-overlap",
+        action="store_true",
+        help="Allow a cross-species transfer evaluation to reuse pathway families from train.",
+    )
     parser.add_argument("--strict", action="store_true")
     return parser.parse_args()
 
@@ -230,13 +252,16 @@ def main() -> None:
     source_overlap = sorted(train.sources & test.sources)
     record_overlap = sorted(train.records & test.records)
     sample_overlap = sorted(train.samples & test.samples)
+    pathway_family_overlap = sorted(train.pathway_families & test.pathway_families)
     cross_split = {
         "source_overlap_count": len(source_overlap),
         "record_overlap_count": len(record_overlap),
         "sample_overlap_count": len(sample_overlap),
+        "pathway_family_overlap_count": len(pathway_family_overlap),
         "source_overlap_examples": source_overlap[:20],
         "record_overlap_examples": record_overlap[:20],
         "sample_overlap_examples": sample_overlap[:20],
+        "pathway_family_overlap_examples": pathway_family_overlap[:20],
     }
     report = {
         "format_version": 1,
@@ -253,11 +278,17 @@ def main() -> None:
     else:
         print(rendered)
 
-    failed = bool(train.errors or test.errors or any(cross_split[key] for key in (
-        "source_overlap_count",
-        "record_overlap_count",
-        "sample_overlap_count",
-    )))
+    failed = bool(
+        train.errors
+        or test.errors
+        or cross_split["source_overlap_count"]
+        or cross_split["record_overlap_count"]
+        or cross_split["sample_overlap_count"]
+        or (
+            cross_split["pathway_family_overlap_count"]
+            and not args.allow_pathway_family_overlap
+        )
+    )
     if args.strict and failed:
         raise SystemExit(1)
 

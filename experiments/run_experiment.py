@@ -287,6 +287,8 @@ def main() -> None:
     prepare_data = sub.add_parser("prepare-data", help="Build record-balanced pilot and eval CSVs from the full KEGG CSVs.")
     prepare_data.add_argument("--record-fraction", type=float, default=0.001)
     prepare_data.add_argument("--phenotype-record-fraction", type=float, default=1.0)
+    prepare_data.add_argument("--pathway-family-holdout-fraction", type=float, default=0.1)
+    prepare_data.add_argument("--pathway-family-holdout-seed", type=int)
     prepare_data.add_argument("--max-prefixes-per-record", type=int, default=3)
     prepare_data.add_argument("--max-test-prefixes-per-record", type=int, default=1)
     prepare_data.add_argument("--max-multistep-prefixes-per-record", type=int, default=3)
@@ -447,10 +449,16 @@ def main() -> None:
             asset_path("data/test_kegg_pathway_eval.csv"),
             "--multistep-test-output",
             asset_path("data/test_kegg_pathway_multistep_eval.csv"),
+            "--organism-test-output",
+            asset_path("data/test_kegg_pathway_organism_eval.csv"),
+            "--organism-multistep-test-output",
+            asset_path("data/test_kegg_pathway_organism_multistep_eval.csv"),
             "--record-fraction",
             str(args.record_fraction),
             "--phenotype-record-fraction",
             str(args.phenotype_record_fraction),
+            "--pathway-family-holdout-fraction",
+            str(args.pathway_family_holdout_fraction),
             "--max-prefixes-per-record",
             str(args.max_prefixes_per_record),
             "--max-test-prefixes-per-record",
@@ -460,8 +468,12 @@ def main() -> None:
             "--seed",
             str(args.seed),
             "--report",
-            asset_path("artifacts/dataset/pilot_record_balanced_v1.json"),
+            asset_path("artifacts/dataset/pilot_record_balanced_family_disjoint_v2.json"),
         ]
+        if args.pathway_family_holdout_seed is not None:
+            command.extend(
+                ["--pathway-family-holdout-seed", str(args.pathway_family_holdout_seed)]
+            )
         if args.overwrite:
             command.append("--overwrite")
         raise SystemExit(subprocess.run(command, check=False).returncode)

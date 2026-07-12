@@ -4,9 +4,9 @@ This file distinguishes code readiness from completed scientific results.
 
 | Requirement | Implemented evidence |
 | --- | --- |
-| stable multi-step JSON and identities | `dataprocess/schemas.py`, `audit_pathway_csv.py` |
+| stable multi-step JSON and identities | sample/record/source/five-digit pathway-family fields in `dataprocess/schemas.py`, `audit_pathway_csv.py` |
 | block-safe phenotype handling | block/file conflict and ambiguity statuses in `build_pathway_csv.py` |
-| record-balanced pilot and held-out evals | `prepare_experiment_data.py` |
+| record-balanced pilot and held-out evals | strict organism-plus-family core split and separately labelled organism-transfer split in `prepare_experiment_data.py` |
 | graph-layer atomic-span targets | `method/training/sequence.py`, `framework_a.py` |
 | no arbitrary q/p split | orthogonal Poisson `J=Q^T J0 Q` |
 | correct forced/damped form | `(J-rI) grad H + F(t)`, zero-init time-only force |

@@ -13,21 +13,28 @@ The profile resolves assets below
 ## 1. Prepare and audit experiment data
 
 The existing full CSV is the 2026-07-11 legacy aggregate-step export. The
-preparation pass scans it once, adds stable record/sample identities, converts
-`missing` to `not_annotated`, conservatively parses substeps, and creates:
+preparation pass adds stable record/sample/family identities, converts `missing`
+to `not_annotated`, conservatively parses substeps, and creates:
 
-- `data/train_kegg_pathway_pilot.csv`: stable 0.1% record sample, at most three
-  prefixes per record, plus every currently annotated phenotype record;
-- `data/test_kegg_pathway_eval.csv`: one last-prefix/next-layer row per record;
-- `data/test_kegg_pathway_multistep_eval.csv`: up to three prefixes per record.
+- `data/train_kegg_pathway_pilot.csv`: stable 0.1% record sample after removing
+  the held-out five-digit KEGG pathway families, at most three prefixes per
+  record, plus every eligible annotated phenotype record;
+- `data/test_kegg_pathway_eval.csv`: strict organism-plus-pathway-family-held-out
+  core evaluation, one last-prefix/next-layer row per record;
+- `data/test_kegg_pathway_multistep_eval.csv`: the same strict records with up
+  to three prefixes per record;
+- `data/test_kegg_pathway_organism_eval.csv` and its multistep companion: the
+  original seven-organism transfer evaluation, where pathway-family overlap is
+  intentional and reported rather than mistaken for unseen-pathway evidence.
 
 ```bash
 python -m experiments.run_experiment prepare-data --overwrite
 ```
 
-The command fails if schema/identity checks fail or any `source_json` crosses
-train and test. Exact `source_items` are preserved by the new JSON builder; the
-already-generated full CSV can only be marked `sentence_parser_v1`.
+The command fails if schema/identity checks fail or a source, record, sample, or
+pathway family crosses the strict train/test boundary. Exact `source_items` are
+preserved by the new JSON builder; the already-generated full CSV can only be
+marked `sentence_parser_v1`.
 
 ## 2. Download the pinned base model
 
@@ -63,6 +70,12 @@ python -m experiments.run_experiment infer exp002_forced_damped_hnn_reconae_join
 For each of `20260711`, `20260712`, and `20260713`, run shared prerequisites,
 the compute-matched stage-2 SFT control, pure HNN, and forced/damped HNN. Compare
 direct outputs from stage-1, stage-2-only, HNN, and forced/damped HNN.
+
+On the four-A100 CFFF node, use `python -m experiments.run_cfff_matrix`. It
+uses all four GPUs for each DDP SFT prerequisite, then schedules independent
+single-GPU AE, stage-2 arms, and inference jobs across the four devices. Thus
+the node is kept busy without pretending that AE/HNN themselves are currently
+four-way distributed.
 
 Validation is a deterministic `source_json` group split. Checkpoint selection
 uses validation loss with early stopping. Every run records config, Git commit,

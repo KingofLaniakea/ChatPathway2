@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
@@ -22,6 +23,7 @@ CSV_FIELDNAMES = [
     "given_step",
     "total_step",
     "pathway_id",
+    "pathway_family_id",
     "entry_id",
     "phenotype",
     "phenotype_status",
@@ -40,6 +42,24 @@ CSV_FIELDNAMES = [
 
 
 QUESTION_TYPE = "remaining_pathway_json"
+PATHWAY_FAMILY_RE = re.compile(r"(\d{5})$")
+
+
+def canonical_pathway_family_id(pathway_id: object) -> str:
+    """Return the cross-organism KEGG pathway family identifier.
+
+    Organism-specific KEGG IDs such as ``hsa04010`` and ``mmu04010`` share
+    the same five-digit reference-map suffix.  Keeping that suffix explicit
+    lets split/audit code prevent the same KEGG pathway family from crossing
+    train and a strict held-out evaluation.  Non-standard IDs remain visible
+    under a ``raw:`` namespace instead of being silently discarded.
+    """
+
+    normalized = str(pathway_id or "").strip()
+    match = PATHWAY_FAMILY_RE.search(normalized)
+    if match:
+        return match.group(1)
+    return f"raw:{normalized.casefold()}" if normalized else "raw:<missing>"
 
 
 @dataclass(frozen=True)
@@ -101,6 +121,10 @@ class PathwayRecord:
     pathway_title: str
     steps: Sequence[PathwayStep]
     phenotype: PhenotypeTarget
+
+    @property
+    def pathway_family_id(self) -> str:
+        return canonical_pathway_family_id(self.pathway_id)
 
     @property
     def record_id(self) -> str:
@@ -192,6 +216,7 @@ class PathwayExample:
             "given_step": self.given_step,
             "total_step": self.record.total_step,
             "pathway_id": self.record.pathway_id,
+            "pathway_family_id": self.record.pathway_family_id,
             "entry_id": self.record.entry_id,
             "phenotype": phenotype_text,
             "phenotype_status": self.record.phenotype.status,

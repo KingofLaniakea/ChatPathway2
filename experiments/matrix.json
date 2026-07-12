@@ -1,13 +1,15 @@
 {
-  "version": "2026-07-11c",
-  "purpose": "Direct-inference controlled benchmark on a record-balanced KEGG pilot. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
+  "version": "2026-07-12a",
+  "purpose": "Direct-inference controlled benchmark on a record-balanced, pathway-family-disjoint KEGG pilot. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
   "dataset_profile": {
-    "name": "pilot_record_balanced_v1",
+    "name": "pilot_record_balanced_family_disjoint_v2",
     "source": "train_kegg_pathway_dataset.csv (32,258,032 prefix rows)",
-    "selection": "seeded 0.1% record hash; at most three evenly spaced prefixes per record; all currently annotated phenotype records retained",
+    "selection": "seeded 0.1% record hash after removing the deterministically reserved KEGG pathway families; at most three evenly spaced prefixes per record; all eligible annotated phenotype records retained",
     "train": "data/train_kegg_pathway_pilot.csv",
-    "core_eval": "data/test_kegg_pathway_eval.csv (one last-prefix/next-layer row per record)",
-    "multistep_eval": "data/test_kegg_pathway_multistep_eval.csv",
+    "core_eval": "data/test_kegg_pathway_eval.csv (held-out organisms plus held-out five-digit KEGG pathway families; one last-prefix/next-layer row per record)",
+    "multistep_eval": "data/test_kegg_pathway_multistep_eval.csv (same strict family-disjoint records; up to three prefixes)",
+    "organism_transfer_eval": "data/test_kegg_pathway_organism_eval.csv (all seven held-out organisms; pathway-family overlap is allowed and reported)",
+    "organism_transfer_multistep_eval": "data/test_kegg_pathway_organism_multistep_eval.csv",
     "semantic_unit": "ordered graph layers; same-layer A-relation-B spans form one contextual pooled state and never consume separate ODE time",
     "source_schema_note": "The 2026-07-11 full CSV is upgraded with sentence_parser_v1; a future rebuild from processed JSON preserves exact source_items as layer_set_v1."
   },

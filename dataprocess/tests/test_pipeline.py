@@ -10,10 +10,25 @@ from pathlib import Path
 
 from dataprocess.audit_pathway_csv import audit_file
 from dataprocess.build_pathway_csv import extract_graph_fields, main as build_main
-from dataprocess.prepare_experiment_data import prepare_test, prepare_train
+from dataprocess.prepare_experiment_data import (
+    prepare_test,
+    prepare_train,
+    select_holdout_families,
+)
+from dataprocess.schemas import canonical_pathway_family_id
 
 
 class DatasetPipelineTests(unittest.TestCase):
+    def test_cross_organism_pathway_family_is_canonical(self) -> None:
+        self.assertEqual(canonical_pathway_family_id("hsa04010"), "04010")
+        self.assertEqual(canonical_pathway_family_id("mmu04010"), "04010")
+        heldout = select_holdout_families(
+            {"00010", "00020", "04010", "05200"},
+            fraction=0.25,
+            seed=20260711,
+        )
+        self.assertEqual(len(heldout), 1)
+
     def test_file_level_phenotype_is_not_copied_across_blocks(self) -> None:
         graph = {
             "phenotype": "file-wide label",
@@ -128,6 +143,10 @@ class DatasetPipelineTests(unittest.TestCase):
             with full_train.open(newline="", encoding="utf-8") as handle:
                 train_rows = list(csv.DictReader(handle))
             self.assertEqual(len(train_rows), 4)
+            self.assertEqual(
+                {row["pathway_family_id"] for row in train_rows},
+                {"00001"},
+            )
             statuses_by_block = {
                 block: {row["phenotype_status"] for row in train_rows if row["pathway_block"] == block}
                 for block in {row["pathway_block"] for row in train_rows}
@@ -166,6 +185,28 @@ class DatasetPipelineTests(unittest.TestCase):
             self.assertEqual(len(test_audit.records), 1)
             self.assertEqual(test_audit.rows, 1)
             self.assertEqual(multistep_audit.rows, 2)
+            self.assertEqual(train_audit.pathway_families, {"00001"})
+            self.assertEqual(test_audit.pathway_families, {"00001"})
+
+            excluded_pilot = data / "excluded_pilot.csv"
+            excluded_eval = data / "excluded_eval.csv"
+            with self.assertRaises(ValueError):
+                prepare_train(
+                    full_train,
+                    excluded_pilot,
+                    record_fraction=1.0,
+                    max_prefixes_per_record=2,
+                    seed=20260711,
+                    phenotype_record_fraction=1.0,
+                    excluded_pathway_families={"00001"},
+                )
+            include_stats = prepare_test(
+                full_test,
+                excluded_eval,
+                max_prefixes_per_record=1,
+                included_pathway_families={"00001"},
+            )
+            self.assertEqual(include_stats["selected_records"], 1)
 
 
 if __name__ == "__main__":

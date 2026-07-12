@@ -11,6 +11,11 @@ the first result can be attributed.
 | `exp001_hnn_reconae_joint_direct` | stage-2 SFT plus `J grad H` |
 | `exp002_forced_damped_hnn_reconae_joint_direct` | primary stage-2 SFT plus `(J-rI) grad H + F(t)` |
 
+The default core evaluation is disjoint from training by both held-out organism
+and canonical five-digit KEGG pathway family. The separate
+`test_kegg_pathway_organism_eval.csv` retains all seven held-out organisms and
+allows reported family overlap for cross-species-transfer analysis.
+
 All mutable artifacts are seed-scoped:
 
 ```text
@@ -49,6 +54,24 @@ python -m experiments.run_experiment infer exp003_stage2_sft_only_direct -- --se
 python -m experiments.run_experiment infer exp001_hnn_reconae_joint_direct -- --seed "$SEED"
 python -m experiments.run_experiment infer exp002_forced_damped_hnn_reconae_joint_direct -- --seed "$SEED"
 ```
+
+## Four-A100 CFFF schedule
+
+The shared SFT is a four-process DDP job. AE, each stage-2 arm, and each
+inference job are single-GPU by design. To keep the machine busy without
+claiming false model-parallelism, run the dependency-aware scheduler:
+
+```bash
+python -m experiments.run_cfff_matrix \
+  --seeds 20260711,20260712,20260713 \
+  --gpus 0,1,2,3
+```
+
+It runs the three SFT prerequisites sequentially with all four GPUs, then fills
+the GPUs with independent AE, stage-2 control/HNN/forced-damped jobs and direct
+inference as their dependencies become available. Completed outputs are skipped
+on restart; partial non-empty trainer directories still fail closed instead of
+being overwritten. Inspect the plan without launching with `--dry-run`.
 
 Every trainer refuses a non-empty output directory. Passing a different seed
 selects a different artifact tree; it does not change the prepared pilot rows.
