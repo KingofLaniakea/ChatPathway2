@@ -30,7 +30,8 @@ export CHATPATHWAY_PROFILE=cfff
 python -m experiments.run_experiment prepare-data --overwrite
 python -m experiments.run_experiment download-model
 python -m experiments.run_experiment check-assets \
-  --phase train --ids base000_shared_sft_reconae --profile cfff --strict
+  --phase train --ids base000_shared_sft_reconae --profile cfff \
+  --create-output-dirs --strict
 ```
 
 ## One-seed run
