@@ -34,6 +34,7 @@ class InferenceConfig:
     seed: int
     device: str
     overwrite: bool
+    completion_marker: str | None
 
 
 def parse_args() -> InferenceConfig:
@@ -52,6 +53,11 @@ def parse_args() -> InferenceConfig:
     parser.add_argument("--seed", type=int, default=20260711)
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--overwrite", action="store_true", help="Allow replacing an existing output CSV.")
+    parser.add_argument(
+        "--require-complete",
+        dest="completion_marker",
+        help="Require a trainer run_complete.json marker with status=completed before inference.",
+    )
     args = parser.parse_args()
     return InferenceConfig(
         base_model_id=args.base_model,
@@ -65,11 +71,19 @@ def parse_args() -> InferenceConfig:
         seed=args.seed,
         device=args.device,
         overwrite=args.overwrite,
+        completion_marker=args.completion_marker,
     )
 
 
 def run_inference(cfg: InferenceConfig) -> None:
     seed_everything(cfg.seed)
+    if cfg.completion_marker:
+        marker_path = Path(cfg.completion_marker)
+        if not marker_path.is_file():
+            raise FileNotFoundError(f"Required training completion marker is missing: {marker_path}")
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        if marker.get("status") != "completed":
+            raise ValueError(f"Training completion marker is not completed: {marker_path}")
     output_path = Path(cfg.output_data_path)
     if output_path.exists() and not cfg.overwrite:
         raise FileExistsError(
@@ -234,6 +248,9 @@ def run_inference(cfg: InferenceConfig) -> None:
                 **asdict(cfg),
                 "git_commit": git_commit(Path(__file__).resolve().parents[2]),
                 "input_sha256": file_sha256(cfg.test_data_path),
+                "completion_marker_sha256": (
+                    file_sha256(cfg.completion_marker) if cfg.completion_marker else None
+                ),
                 "input_rows": len(df),
                 "finish_reason_counts": {
                     str(key): int(value)

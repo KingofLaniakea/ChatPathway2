@@ -123,6 +123,11 @@ def print_candidates(matrix: dict[str, Any]) -> None:
         print(f"\n[{axis}]")
         for value in values:
             print(f"- {value}")
+    combinations = matrix.get("combinations", [])
+    if combinations:
+        print("\n[post_current_research_and_deferred_combinations]")
+        for value in combinations:
+            print(f"- {value['id']}: {value['title']} ({value['status']})")
 
 
 def parse_id_list(raw: str | None) -> set[str] | None:
@@ -286,7 +291,10 @@ def main() -> None:
     prepare_smoke.add_argument("--overwrite", action="store_true")
     prepare_smoke.add_argument("--skip-missing", action="store_true")
 
-    prepare_data = sub.add_parser("prepare-data", help="Build record-balanced pilot and eval CSVs from the full KEGG CSVs.")
+    prepare_data = sub.add_parser(
+        "prepare-data",
+        help="Build the record-balanced 0.1% first-round training set and evaluation CSVs from the full KEGG CSVs.",
+    )
     prepare_data.add_argument("--record-fraction", type=float, default=0.001)
     prepare_data.add_argument("--phenotype-record-fraction", type=float, default=1.0)
     prepare_data.add_argument("--pathway-family-holdout-fraction", type=float, default=0.1)
@@ -450,7 +458,7 @@ def main() -> None:
             "--test-input",
             asset_path("data/test_kegg_pathway_dataset.csv"),
             "--train-output",
-            asset_path("data/train_kegg_pathway_pilot.csv"),
+            asset_path("data/train_kegg_pathway_record_balanced_0p1pct.csv"),
             "--test-output",
             asset_path("data/test_kegg_pathway_eval.csv"),
             "--multistep-test-output",
@@ -474,7 +482,7 @@ def main() -> None:
             "--seed",
             str(args.seed),
             "--report",
-            asset_path("artifacts/dataset/pilot_record_balanced_family_disjoint_v2.json"),
+            asset_path("artifacts/dataset/record_balanced_0p1pct_family_disjoint_v2.json"),
         ]
         if args.pathway_family_holdout_seed is not None:
             command.extend(

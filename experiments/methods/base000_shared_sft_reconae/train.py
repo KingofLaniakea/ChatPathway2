@@ -15,7 +15,7 @@ if __name__ == "__main__":
             [
                 *controlled_training_budget_args(),
                 "--base-model", asset_path("models/qwen3_8B"),
-                "--train", asset_path("data/train_kegg_pathway_pilot.csv"),
+                "--train", asset_path("data/train_kegg_pathway_record_balanced_0p1pct.csv"),
                 "--save-dir", seeded_asset_path("checkpoints/shared/pathway_sft"),
             ],
         ),
@@ -25,7 +25,7 @@ if __name__ == "__main__":
                 *controlled_training_budget_args(),
                 "--base-model", asset_path("models/qwen3_8B"),
                 "--sft-lora", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best"),
-                "--train", asset_path("data/train_kegg_pathway_pilot.csv"),
+                "--train", asset_path("data/train_kegg_pathway_record_balanced_0p1pct.csv"),
                 "--save-dir", seeded_asset_path("checkpoints/shared/pathway_reconstruction_ae"),
             ],
         ),

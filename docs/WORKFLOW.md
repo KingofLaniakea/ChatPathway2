@@ -1,5 +1,8 @@
 # Server-to-result workflow
 
+The exact current data-layer status is frozen in
+[DATASET_STATUS_2026-07-13.md](DATASET_STATUS_2026-07-13.md).
+
 Run from the `ChatPathway2` repository root. On CFFF:
 
 ```bash
@@ -17,7 +20,7 @@ The existing full CSV is the 2026-07-11 legacy aggregate-step export. The
 preparation pass adds stable record/sample/family identities, converts `missing`
 to `not_annotated`, conservatively parses substeps, and creates:
 
-- `data/train_kegg_pathway_pilot.csv`: stable 0.1% record sample after removing
+- `data/train_kegg_pathway_record_balanced_0p1pct.csv`: stable 0.1% record sample after removing
   the held-out five-digit KEGG pathway families, at most three prefixes per
   record, plus every eligible annotated phenotype record;
 - `data/test_kegg_pathway_eval.csv`: strict organism-plus-pathway-family-held-out
@@ -42,10 +45,10 @@ used by SFT, AE, and stage 2 before launching the matrix:
 
 ```bash
 python -m dataprocess.audit_token_budget \
-  --input "$BASE/data/train_kegg_pathway_pilot.csv" \
+  --input "$BASE/data/train_kegg_pathway_record_balanced_0p1pct.csv" \
   --base-model "$BASE/models/qwen3_8B" \
   --max-length 8192 \
-  --output "$BASE/artifacts/dataset/pilot_token_budget_8192.json"
+  --output "$BASE/artifacts/dataset/record_balanced_0p1pct_token_budget_8192.json"
 ```
 
 Text-budget truncation is distinct from the 128-step ODE cap and is reported
@@ -127,10 +130,19 @@ Task 4 knockout/rescue is not eligible until real intervention evidence and a
 validation-calibrated phenotype scorer exist. Missing phenotype labels are
 excluded, not converted to negatives.
 
-## Explicitly deferred
+## Explicitly retained for after the current matrix
 
-- rollout/mixed generation: training unit is graph layer, while the discarded
-  prototype advanced once per token;
+- graph-layer-by-graph-layer generation: add a validated JSON layer-boundary
+  controller and advance the existing dynamics once per completed layer;
+- token-by-token generation: train a separate token-resolution dynamics
+  objective; never reuse a graph-layer checkpoint as a per-token vector field;
+- multiscale mixed generation: combine the two controllers only after both are
+  independently validated, then ablate against direct greedy generation;
+- for all three, report biological validity, JSON validity, long-horizon error,
+  and compute under matched decoding budgets;
+
+## Deferred for missing scientific contracts
+
 - PHNN: no independent observed `u`/port exists;
 - phenotype causal claims: current full data contains no available labels;
 - Neural ODE expansion: wait until the Hamiltonian benchmark is validated.

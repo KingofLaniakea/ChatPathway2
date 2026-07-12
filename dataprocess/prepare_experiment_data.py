@@ -2,7 +2,7 @@
 """Create reproducible, record-balanced train/eval CSVs from the full corpus.
 
 The full generated training CSV contains tens of millions of prefix rows and
-therefore overweights long pathway records. The default pilot keeps a stable
+therefore overweights long pathway records. The default first-round training set keeps a stable
 hash-selected 0.1% of eligible pathway records and at most three evenly spaced
 prefixes per record (long-continuation, middle, and next-step views). Pathway
 families reserved from the held-out organisms are removed from training and
@@ -34,7 +34,7 @@ except ImportError:  # Allows: python dataprocess/prepare_experiment_data.py
 
 DEFAULT_TRAIN_INPUT = "../data/train_kegg_pathway_dataset.csv"
 DEFAULT_TEST_INPUT = "../data/test_kegg_pathway_dataset.csv"
-DEFAULT_TRAIN_OUTPUT = "../data/train_kegg_pathway_pilot.csv"
+DEFAULT_TRAIN_OUTPUT = "../data/train_kegg_pathway_record_balanced_0p1pct.csv"
 DEFAULT_TEST_OUTPUT = "../data/test_kegg_pathway_eval.csv"
 DEFAULT_MULTISTEP_TEST_OUTPUT = "../data/test_kegg_pathway_multistep_eval.csv"
 DEFAULT_ORGANISM_TEST_OUTPUT = "../data/test_kegg_pathway_organism_eval.csv"
@@ -460,7 +460,7 @@ def main() -> None:
     )
     report = {
         "format_version": 1,
-        "profile": "pilot_record_balanced_family_disjoint_v2",
+        "profile": "record_balanced_0p1pct_family_disjoint_v2",
         "pathway_family_holdout": {
             "definition": "terminal five-digit KEGG pathway reference-map id",
             "selection": "lowest deterministic SHA-256 family ranks among held-out organisms",

@@ -1,11 +1,11 @@
 {
-  "version": "2026-07-12c",
-  "purpose": "Direct-inference controlled benchmark on a record-balanced, pathway-family-disjoint KEGG pilot. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
+  "version": "2026-07-13a",
+  "purpose": "Direct-inference controlled benchmark on the record-balanced 0.1% first-round KEGG training set with pathway-family-disjoint evaluation. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
   "dataset_profile": {
-    "name": "pilot_record_balanced_family_disjoint_v2",
+    "name": "record_balanced_0p1pct_family_disjoint_v2",
     "source": "train_kegg_pathway_dataset.csv (32,258,032 prefix rows)",
     "selection": "seeded 0.1% record hash after removing the deterministically reserved KEGG pathway families; at most three evenly spaced prefixes per record; all eligible annotated phenotype records retained",
-    "train": "data/train_kegg_pathway_pilot.csv",
+    "train": "data/train_kegg_pathway_record_balanced_0p1pct.csv",
     "core_eval": "data/test_kegg_pathway_eval.csv (held-out organisms plus held-out five-digit KEGG pathway families; one last-prefix/next-layer row per record)",
     "multistep_eval": "data/test_kegg_pathway_multistep_eval.csv (same strict family-disjoint records; up to three prefixes)",
     "organism_transfer_eval": "data/test_kegg_pathway_organism_eval.csv (all seven held-out organisms; pathway-family overlap is allowed and reported)",
@@ -21,7 +21,7 @@
     "measured_train_semantic_step_retention": 0.9916784555213448,
     "measured_train_substep_retention": 0.910670531076294,
     "measured_rows_with_zero_retained_semantic_steps": 31,
-    "measurement_artifact": "artifacts/dataset/pilot_token_budget_8192.json"
+    "measurement_artifact": "artifacts/dataset/record_balanced_0p1pct_token_budget_8192.json"
   },
   "validation_policy": {
     "group_column": "pathway_family_id",
@@ -138,10 +138,37 @@
   ],
   "combinations": [
     {
-      "id": "plan011_014_semantic_boundary_guided_inference",
-      "status": "blocked_unit_mismatch",
-      "title": "Rollout/mixed inference after implementing a JSON graph-layer boundary controller",
-      "reason": "Current guided inference advances per generated token while dynamics is trained per graph layer."
+      "id": "plan011_graph_layer_boundary_stepwise",
+      "status": "deferred_until_after_current_matrix",
+      "title": "Graph-layer-by-graph-layer generation with a validated JSON layer-boundary controller",
+      "research_phase": "post_current_hamiltonian_matrix",
+      "not_removed": true,
+      "resolution": "graph_layer",
+      "training_requirement": "Reuse the graph-layer dynamics checkpoint only when one dynamics advance corresponds to one completed graph layer.",
+      "evaluation_requirement": "Compare against direct greedy generation on biological validity, JSON validity, long-horizon error, and compute."
+    },
+    {
+      "id": "plan012_token_resolution_stepwise",
+      "status": "deferred_until_after_current_matrix",
+      "title": "Token-by-token generation with separately trained token-resolution dynamics",
+      "research_phase": "post_current_hamiltonian_matrix",
+      "not_removed": true,
+      "resolution": "token",
+      "requires_separately_trained_token_resolution_dynamics": true,
+      "forbids_graph_layer_checkpoint_per_token": true,
+      "evaluation_requirement": "Compare against direct greedy and graph-layer generation on biological validity, JSON validity, long-horizon error, and compute."
+    },
+    {
+      "id": "plan013_multiscale_hybrid_generation",
+      "status": "deferred_until_after_current_matrix",
+      "title": "Multiscale hybrid generation combining token and completed-layer controllers",
+      "research_phase": "post_current_hamiltonian_matrix",
+      "not_removed": true,
+      "depends_on": [
+        "plan011_graph_layer_boundary_stepwise",
+        "plan012_token_resolution_stepwise"
+      ],
+      "evaluation_requirement": "Ablate each controller and compare against direct greedy generation under matched decoding budgets."
     },
     {
       "id": "plan020_phnn_port_contract",

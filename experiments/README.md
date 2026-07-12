@@ -29,7 +29,8 @@ shared SFT and AE. Recommended seeds are `20260711`, `20260712`, and
 `20260713`.
 
 The controlled matrix pins `max_length=8192` and per-process training
-`batch_size=1` for SFT, AE, and every stage-2 arm. On the prepared CFFF pilot,
+`batch_size=1` for SFT, AE, and every stage-2 arm. On the prepared CFFF
+record-balanced 0.1% first-round training set,
 this retains 99.17% of graph-layer targets and 91.07% of substeps; 31 of 17,416
 rows have no complete semantic layer inside the text budget and therefore
 contribute CE but no dynamics loss. Truncation counters remain mandatory
@@ -82,11 +83,13 @@ python -m experiments.run_cfff_matrix \
 It runs the three SFT prerequisites sequentially with all four GPUs, then fills
 the GPUs with independent AE, stage-2 control/HNN/forced-damped jobs and direct
 inference as their dependencies become available. Completed outputs are skipped
-on restart; partial non-empty trainer directories still fail closed instead of
-being overwritten. Inspect the plan without launching with `--dry-run`.
+on restart only when the trainer's atomic `run_complete.json` marker and
+required checkpoints all exist. Partial non-empty trainer directories fail
+closed instead of being mistaken for a finished run or overwritten. Inspect
+the plan without launching with `--dry-run`.
 
 Every trainer refuses a non-empty output directory. Passing a different seed
-selects a different artifact tree; it does not change the prepared pilot rows.
+selects a different artifact tree; it does not change the prepared training rows.
 
 ## Smoke and audits
 
@@ -101,7 +104,16 @@ python -m unittest discover -s experiments/tests -v
 python -m unittest discover -s method/tests -v
 ```
 
-Direct greedy inference is the only active inference mode. A graph-layer HNN
-cannot be advanced once per generated token: rollout/mixed rows are blocked
-until a validated JSON graph-layer boundary controller exists. PHNN likewise
-waits for a real port/control contract.
+Direct greedy inference is the only active inference mode in the current
+Hamiltonian matrix. The following generation studies are explicitly retained
+for the next research phase; they have not been deleted:
+
+- graph-layer-by-graph-layer generation after a validated JSON layer-boundary
+  controller exists;
+- token-by-token generation after training a separate token-resolution dynamics
+  objective; the graph-layer checkpoint must not be advanced once per token;
+- a multiscale hybrid of the two controllers, ablated against direct greedy
+  generation under matched decoding budgets.
+
+All three must compare biological validity, JSON validity, long-horizon error,
+and compute. PHNN likewise waits for a real port/control contract.

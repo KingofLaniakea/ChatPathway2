@@ -1,24 +1,28 @@
 {
-  "version": "2026-07-12c",
+  "version": "2026-07-13a",
   "asset_root": "/root/autodl-tmp",
   "rows": {
     "base000_shared_sft_reconae": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
       ],
       "infer_requires": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/run_complete.json"
       ],
       "train_outputs": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/run_complete.json"
       ],
       "infer_artifacts": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
@@ -37,17 +41,20 @@
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
       ],
       "train_requires": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/test_kegg_pathway_eval.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_outputs": [
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.csv"
@@ -57,14 +64,14 @@
     "exp003_stage2_sft_only_direct": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv",
         "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
@@ -73,10 +80,12 @@
         "/root/autodl-tmp/data/test_kegg_pathway_eval.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.csv"
@@ -86,14 +95,14 @@
     "exp001_hnn_reconae_joint_direct": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv",
         "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
@@ -103,10 +112,12 @@
       ],
       "train_outputs": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv"
@@ -116,14 +127,14 @@
     "exp002_forced_damped_hnn_reconae_joint_direct": {
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv",
         "/root/autodl-tmp/data/test_kegg_pathway_eval.csv",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
-        "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv",
+        "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
@@ -133,10 +144,12 @@
       ],
       "train_outputs": [
         "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv"
@@ -150,7 +163,7 @@
     "override": "Set CHATPATHWAY_PROFILE=cfff or CHATPATHWAY_ASSET_ROOT; pass --seed to select the seed-scoped checkpoint/run tree.",
     "subdirs": {
       "models": "Pinned base model",
-      "data": "Full source CSV plus prepared pilot/eval CSVs",
+      "data": "Full source CSV plus the record-balanced 0.1% first-round training set and evaluation CSVs",
       "checkpoints": "Shared and seed-specific experiment checkpoints",
       "runs": "Inference outputs",
       "artifacts": "Audits and downstream reports"

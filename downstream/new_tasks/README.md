@@ -4,6 +4,9 @@ This directory is the strict Task 0-6 contract for new experiments. It does
 not replace or mutate historical entry points under `downstream/tasks/`, so old
 artifacts remain reproducible.
 
+The detailed Chinese task definition and data-team handoff instructions are
+frozen in [FROZEN_TASK_SPEC_2026-07-13.md](FROZEN_TASK_SPEC_2026-07-13.md).
+
 The suite follows three non-negotiable rules:
 
 1. Token/substep index is reasoning order, not biological clock time.

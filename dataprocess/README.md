@@ -65,7 +65,7 @@ python -m experiments.run_experiment prepare-data --overwrite
 
 This streaming pass creates:
 
-- a record-balanced training pilot that excludes the deterministically reserved
+- a record-balanced 0.1% first-round training set that excludes the deterministically reserved
   KEGG pathway families;
 - strict core/multi-step evaluations whose organisms and pathway families are
   both absent from training;

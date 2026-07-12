@@ -37,7 +37,7 @@ from method.training.sequence import encode_supervised
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
 DEFAULT_SFT = "/root/autodl-tmp/checkpoints/shared/pathway_sft/checkpoint_best"
-DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
+DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
 DEFAULT_SAVE = "/root/autodl-tmp/checkpoints/shared/pathway_reconstruction_ae"
 
 
@@ -338,6 +338,7 @@ def train() -> None:
     )
     early_stopping = EarlyStopping(cfg.early_stopping_patience, cfg.early_stopping_min_delta)
     history: list[dict[str, Any]] = []
+    stopped_early = False
     optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, cfg.epochs + 1):
@@ -401,6 +402,7 @@ def train() -> None:
                 },
             )
         if should_stop:
+            stopped_early = True
             logger.info(
                 "early_stop epoch=%d best_epoch=%d best_validation_total=%.6f",
                 epoch,
@@ -408,6 +410,17 @@ def train() -> None:
                 early_stopping.best,
             )
             break
+
+    write_json(
+        save_root / "run_complete.json",
+        {
+            "status": "completed",
+            "completed_epochs": len(history),
+            "best_epoch": early_stopping.best_epoch,
+            "best_validation_total": early_stopping.best,
+            "early_stopped": stopped_early,
+        },
+    )
 
 
 if __name__ == "__main__":

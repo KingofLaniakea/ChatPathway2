@@ -22,6 +22,12 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             ("11:exp001_hnn_reconae_joint_direct:train",),
         )
         self.assertIn("torch.distributed.run", by_key["11:sft"].command)
+        self.assertIn(Path("/assets/checkpoints/seeds/11/shared/pathway_sft/run_complete.json"), by_key["11:sft"].outputs)
+        self.assertIn(Path("/assets/checkpoints/seeds/11/shared/pathway_reconstruction_ae/run_complete.json"), by_key["11:ae"].outputs)
+        self.assertIn(
+            Path("/assets/checkpoints/seeds/11/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"),
+            by_key["11:exp001_hnn_reconae_joint_direct:train"].outputs,
+        )
         for key in ("11:sft", "11:ae"):
             command = by_key[key].command
             self.assertEqual(command[command.index("--max-length") + 1], "8192")

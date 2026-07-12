@@ -159,12 +159,12 @@ class DatasetPipelineTests(unittest.TestCase):
                 ["B activates E."],
             )
 
-            pilot = data / "pilot.csv"
+            sampled_train = data / "record_balanced_train.csv"
             core_eval = data / "core_eval.csv"
             multistep_eval = data / "multistep_eval.csv"
             train_stats = prepare_train(
                 full_train,
-                pilot,
+                sampled_train,
                 record_fraction=1.0,
                 max_prefixes_per_record=2,
                 seed=20260711,
@@ -175,7 +175,7 @@ class DatasetPipelineTests(unittest.TestCase):
             self.assertEqual(train_stats["input_records"], 2)
             self.assertEqual(test_stats["input_records"], 1)
 
-            train_audit = audit_file(pilot, max_errors=20)
+            train_audit = audit_file(sampled_train, max_errors=20)
             test_audit = audit_file(core_eval, max_errors=20)
             multistep_audit = audit_file(multistep_eval, max_errors=20)
             self.assertEqual(train_audit.errors, [])
@@ -188,12 +188,12 @@ class DatasetPipelineTests(unittest.TestCase):
             self.assertEqual(train_audit.pathway_families, {"00001"})
             self.assertEqual(test_audit.pathway_families, {"00001"})
 
-            excluded_pilot = data / "excluded_pilot.csv"
+            excluded_train = data / "excluded_record_balanced_train.csv"
             excluded_eval = data / "excluded_eval.csv"
             with self.assertRaises(ValueError):
                 prepare_train(
                     full_train,
-                    excluded_pilot,
+                    excluded_train,
                     record_fraction=1.0,
                     max_prefixes_per_record=2,
                     seed=20260711,

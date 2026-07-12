@@ -79,7 +79,7 @@ def experiment_command(python: str, phase: str, experiment_id: str, seed: int) -
 def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
     jobs: list[Job] = []
     model = root / "models/qwen3_8B"
-    train = root / "data/train_kegg_pathway_pilot.csv"
+    train = root / "data/train_kegg_pathway_record_balanced_0p1pct.csv"
     test = root / "data/test_kegg_pathway_eval.csv"
 
     for seed in seeds:
@@ -117,6 +117,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                 outputs=(
                     sft_root / "checkpoint_best/adapter_model.safetensors",
                     sft_root / "run_manifest.json",
+                    sft_root / "run_complete.json",
                 ),
             )
         )
@@ -145,6 +146,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                 outputs=(
                     ae_root / "checkpoint_best/ae_proj.pt",
                     ae_root / "run_manifest.json",
+                    ae_root / "run_complete.json",
                 ),
             )
         )
@@ -179,6 +181,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                         checkpoint / "adapter_model.safetensors",
                         checkpoint / "hamiltonian_dynamics.pt",
                         checkpoint.parent / "run_manifest.json",
+                        checkpoint.parent / "run_complete.json",
                     ),
                 )
             )
@@ -212,7 +215,7 @@ def validate_inputs(root: Path) -> None:
     required = (
         root / "models/qwen3_8B/config.json",
         root / "models/qwen3_8B/chatpathway_download_manifest.json",
-        root / "data/train_kegg_pathway_pilot.csv",
+        root / "data/train_kegg_pathway_record_balanced_0p1pct.csv",
         root / "data/test_kegg_pathway_eval.csv",
     )
     missing = [str(path) for path in required if not path.exists()]

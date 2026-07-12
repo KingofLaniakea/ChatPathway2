@@ -22,6 +22,11 @@ REQUIRED_FIELDS = (
     "infer_module",
     "notes",
 )
+POST_CURRENT_GENERATION_IDS = {
+    "plan011_graph_layer_boundary_stepwise",
+    "plan012_token_resolution_stepwise",
+    "plan013_multiscale_hybrid_generation",
+}
 
 
 def module_to_file(module: str) -> Path:
@@ -113,6 +118,38 @@ def validate_runtime_manifest(row_ids: set[str]) -> list[str]:
     return errors
 
 
+def validate_research_plan(matrix: dict[str, Any]) -> list[str]:
+    """Keep deferred generation questions explicit without making them runnable."""
+
+    errors: list[str] = []
+    for row in matrix.get("implemented", []):
+        inference = row.get("c_inference")
+        if inference not in {"artifact_check", "c0_direct_lora"}:
+            errors.append(
+                f"{row.get('id', '<missing id>')}: current matrix must use direct inference; got {inference!r}"
+            )
+    combinations = matrix.get("combinations", [])
+    by_id = {item.get("id"): item for item in combinations}
+    missing = sorted(POST_CURRENT_GENERATION_IDS - set(by_id))
+    if missing:
+        errors.append(f"missing post-current generation studies: {', '.join(missing)}")
+        return errors
+    for experiment_id in POST_CURRENT_GENERATION_IDS:
+        item = by_id[experiment_id]
+        if item.get("status") != "deferred_until_after_current_matrix":
+            errors.append(f"{experiment_id}: must remain deferred until the current matrix completes")
+        if item.get("research_phase") != "post_current_hamiltonian_matrix":
+            errors.append(f"{experiment_id}: missing post-current research phase")
+        if item.get("not_removed") is not True:
+            errors.append(f"{experiment_id}: must be explicitly marked not_removed")
+    token_item = by_id["plan012_token_resolution_stepwise"]
+    if token_item.get("requires_separately_trained_token_resolution_dynamics") is not True:
+        errors.append("plan012_token_resolution_stepwise: token-resolution dynamics must be trained separately")
+    if token_item.get("forbids_graph_layer_checkpoint_per_token") is not True:
+        errors.append("plan012_token_resolution_stepwise: graph-layer checkpoint reuse per token must be forbidden")
+    return errors
+
+
 def main() -> None:
     matrix = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
     rows = matrix.get("implemented", [])
@@ -125,6 +162,7 @@ def main() -> None:
         seen.add(experiment_id)
         errors.extend(validate_row(row))
     errors.extend(validate_runtime_manifest(seen))
+    errors.extend(validate_research_plan(matrix))
 
     if errors:
         for error in errors:

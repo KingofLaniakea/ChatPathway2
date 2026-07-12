@@ -6,7 +6,7 @@ This file distinguishes code readiness from completed scientific results.
 | --- | --- |
 | stable multi-step JSON and identities | sample/record/source/five-digit pathway-family fields in `dataprocess/schemas.py`, `audit_pathway_csv.py` |
 | block-safe phenotype handling | block/file conflict and ambiguity statuses in `build_pathway_csv.py` |
-| record-balanced pilot and held-out evals | strict organism-plus-family core split and separately labelled organism-transfer split in `prepare_experiment_data.py` |
+| record-balanced 0.1% first-round training set and held-out evals | strict organism-plus-family core split and separately labelled organism-transfer split in `prepare_experiment_data.py` |
 | graph-layer atomic-span targets | `method/training/sequence.py`, `framework_a.py` |
 | no arbitrary q/p split | orthogonal Poisson `J=Q^T J0 Q` |
 | correct forced/damped form | `(J-rI) grad H + F(t)`, zero-init time-only force |
@@ -14,7 +14,7 @@ This file distinguishes code readiness from completed scientific results.
 | reproducibility/model selection | seeds, pathway-family-group validation, early stop, best checkpoint, hashes/logs |
 | three-seed isolation | `seeded_asset_path()` and seed-scoped runtime manifest |
 | direct inference diagnostics | preserved identities, token/finish reason, JSON/schema validity |
-| sequence-budget coverage | 8192-token matrix setting plus `dataprocess.audit_token_budget`; 99.17% layer and 91.07% substep retention on the prepared pilot |
+| sequence-budget coverage | 8192-token matrix setting plus `dataprocess.audit_token_budget`; 99.17% layer and 91.07% substep retention on the prepared training set |
 | revised downstream suite | `downstream/new_tasks` Task 0-6 and semantic exporter |
 
 Executable rows are `base000`, `exp000`, `exp003`, `exp001`, and `exp002`.

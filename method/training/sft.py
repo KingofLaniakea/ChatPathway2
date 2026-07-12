@@ -39,7 +39,7 @@ from method.training.sequence import encode_supervised
 
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
-DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_pilot.csv"
+DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
 DEFAULT_SAVE = "/root/autodl-tmp/checkpoints/shared/pathway_sft"
 
 
@@ -348,6 +348,7 @@ def train() -> None:
     optimizer = optim.AdamW((parameter for parameter in model.parameters() if parameter.requires_grad), lr=cfg.lr)
     early_stopping = EarlyStopping(cfg.early_stopping_patience, cfg.early_stopping_min_delta)
     history: list[dict[str, Any]] = []
+    stopped_early = False
     optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, cfg.epochs + 1):
@@ -434,12 +435,24 @@ def train() -> None:
         if distributed:
             dist.barrier()
         if should_stop:
+            stopped_early = True
             if is_main:
                 logger.info("early_stop epoch=%d best_epoch=%d best_validation_loss=%.6f", epoch, early_stopping.best_epoch, early_stopping.best)
             break
 
     if distributed and dist.is_initialized():
         dist.destroy_process_group()
+    if is_main:
+        write_json(
+            save_root / "run_complete.json",
+            {
+                "status": "completed",
+                "completed_epochs": len(history),
+                "best_epoch": early_stopping.best_epoch,
+                "best_validation_loss": early_stopping.best,
+                "early_stopped": stopped_early,
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ if __name__ == "__main__":
         "experiments.artifact_check",
         [
             "--path", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best"),
+            "--path", seeded_asset_path("checkpoints/shared/pathway_sft/run_complete.json"),
             "--path", seeded_asset_path("checkpoints/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"),
+            "--path", seeded_asset_path("checkpoints/shared/pathway_reconstruction_ae/run_complete.json"),
         ],
     )

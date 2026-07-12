@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart TD
-  data["record-balanced pathway pilot"] --> sft["shared stage-1 SFT"]
+  data["record-balanced 0.1% first-round training set"] --> sft["shared stage-1 SFT"]
   sft --> ae["shared reconstruction AE"]
   sft --> base["stage-1 direct baseline"]
   sft --> s2["compute-matched stage-2 SFT only"]
@@ -25,6 +25,9 @@ and per-process batch size 1; direct inference uses the same prompt budget.
 Validation holds out entire `pathway_family_id` groups and the same seed-keyed
 family split is reused by SFT, AE, and all stage-2 arms.
 
-The matrix does not contain token-level rollout/mixed inference. Dynamics is
-trained at graph-layer resolution, so advancing it per generated token would
-change the unit under study. PHNN and Neural ODE are deferred axes.
+The current matrix uses only direct greedy inference. Three generation studies
+are retained for the next phase: graph-layer boundary generation using the
+current layer-resolution dynamics, token-by-token generation using a separately
+trained token-resolution objective, and a multiscale hybrid. Reusing the
+graph-layer checkpoint as a per-token vector field is forbidden because it
+changes the unit under study. PHNN and Neural ODE remain deferred axes.
