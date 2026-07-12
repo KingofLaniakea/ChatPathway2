@@ -11,6 +11,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 from downstream.common.pathway_json import parse_pathway_payload
+from method.inference.csv_io import read_csv_text_rows
 from method.training.common import file_sha256, git_commit, seed_everything
 from method.training.sequence import trim_prompt_ids
 
@@ -102,17 +103,8 @@ def run_inference(cfg: InferenceConfig) -> None:
     
     # 3. 读取测试集
     print(f"Reading test dataset from {cfg.test_data_path}...")
-    # 使用 quoting=csv.QUOTE_NONE 防范特殊生物信息字符截断
-    # df = pd.read_csv(cfg.test_data_path, quoting=csv.QUOTE_NONE, on_bad_lines='skip')
-    
-    df = pd.read_csv(
-        cfg.test_data_path, 
-        engine='c',
-        quoting=csv.QUOTE_MINIMAL,  # 允许用双引号包裹含有换行、逗号的单元格
-        on_bad_lines='error'
-    )
-    if cfg.limit is not None:
-        df = df.head(cfg.limit).copy()
+    fieldnames, rows = read_csv_text_rows(cfg.test_data_path, limit=cfg.limit)
+    df = pd.DataFrame(rows, columns=fieldnames)
     
     # 打印检查，确保读取进来时列结构是完好的
     print(f"Dataset columns detected: {list(df.columns)}")
