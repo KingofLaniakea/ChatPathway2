@@ -82,6 +82,25 @@ Inference performs at most three attempts. Invalid or unclosed output is
 regenerated with an explicit repair turn and larger token budget. The third
 failure is written to progress JSONL and raises an error.
 
+## Parallel archive transfer to CFFF
+
+Use the shard-level uploader for the 16 independent `processed_graph`
+archives:
+
+```bash
+bash dataprocess/upload_cfff_archives_parallel.sh \
+  /private/tmp/chatpathway_drive_to_cfff_stage \
+  lihaorui@10.193.2.99 \
+  /cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui/KEGG_all_new_processed_graph_archives_20260713 \
+  4 30456 /private/tmp/chatpathway_cfff_20260713.sock
+```
+
+The script transfers only artifacts listed in `SHA256SUMS`. It skips a remote
+artifact only after hashing it, resumes `.incoming.<name>` with SFTP `reput`,
+and atomically exposes the final name only after remote SHA-256 verification.
+Passwords, tokens, private keys, and `rclone.conf` must never enter the script
+or its logs.
+
 ## Build on CFFF
 
 After `processed_graph` and the pinned Qwen tokenizer are present:
