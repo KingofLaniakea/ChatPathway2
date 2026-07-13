@@ -14,6 +14,7 @@ from experiments.runtime_config import active_profile, asset_path
 
 DEFAULT_EXPERIMENT_SEED = "20260711"
 CONTROLLED_MAX_LENGTH = "8192"
+CONTROLLED_MAX_NEW_TOKENS = "1024"
 CONTROLLED_TRAIN_BATCH_SIZE = "1"
 CONTROLLED_VALIDATION_GROUP_COLUMN = "pathway_family_id"
 
@@ -32,9 +33,14 @@ def controlled_training_budget_args() -> list[str]:
 
 
 def controlled_inference_budget_args() -> list[str]:
-    """Prompt budget paired with the controlled training matrix."""
+    """Prompt and generation budgets paired with the controlled matrix."""
 
-    return ["--max-length", CONTROLLED_MAX_LENGTH]
+    return [
+        "--max-length",
+        CONTROLLED_MAX_LENGTH,
+        "--max-new-tokens",
+        CONTROLLED_MAX_NEW_TOKENS,
+    ]
 
 
 def _command_string(command: list[str]) -> str:

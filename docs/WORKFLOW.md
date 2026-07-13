@@ -3,6 +3,10 @@
 The exact current data-layer status is frozen in
 [DATASET_STATUS_2026-07-13.md](DATASET_STATUS_2026-07-13.md).
 
+The maintained direct inference cap is 1024 generated tokens. The strict core
+gold answers have a measured maximum of 925 tokens, so this cap covers the
+reference distribution while limiting non-terminating repetition.
+
 Run from the `ChatPathway2` repository root. On CFFF:
 
 ```bash

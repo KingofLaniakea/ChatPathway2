@@ -5,11 +5,21 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from experiments._launch import experiment_seed, seeded_asset_path, step_commands
+from experiments._launch import (
+    controlled_inference_budget_args,
+    experiment_seed,
+    seeded_asset_path,
+    step_commands,
+)
 from experiments.check_runtime_assets import rewrite_asset_path
 
 
 class LaunchTests(unittest.TestCase):
+    def test_controlled_inference_budget_covers_core_gold_without_runaway_generation(self) -> None:
+        args = controlled_inference_budget_args()
+        self.assertEqual(args[args.index("--max-length") + 1], "8192")
+        self.assertEqual(args[args.index("--max-new-tokens") + 1], "1024")
+
     def test_run_steps_passthrough_is_appended_to_every_stage(self) -> None:
         commands = step_commands(
             [("stage.one", ["--fixed", "a"]), ("stage.two", ["--fixed", "b"])],

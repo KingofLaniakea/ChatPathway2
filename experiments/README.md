@@ -36,6 +36,10 @@ rows have no complete semantic layer inside the text budget and therefore
 contribute CE but no dynamics loss. Truncation counters remain mandatory
 reported metrics.
 
+Direct inference pins `max_new_tokens=1024`. On the 764-row strict core
+evaluation, the longest gold answer is 925 tokens (99th percentile 678), so
+the cap covers every gold target while bounding non-terminating repetition.
+
 Checkpoint selection uses a deterministic `pathway_family_id` validation split,
 not a row or source-only split. For seeds `20260711/12/13`, validation contains
 16/18/17 entire families respectively and has zero family overlap with that
