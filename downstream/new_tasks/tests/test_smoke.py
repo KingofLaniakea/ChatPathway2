@@ -92,7 +92,7 @@ class RevisedDownstreamSmokeTests(unittest.TestCase):
                 "dataset_id": "synthetic",
                 "split": "test",
                 "model_checkpoint": "model@sha",
-                "parser_version": "atomic_relation_v1",
+                "parser_version": "atomic_relation_v2",
                 "ordering_mode": "layer_set",
             },
         )

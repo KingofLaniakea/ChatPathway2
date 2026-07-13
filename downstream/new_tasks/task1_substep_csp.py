@@ -42,6 +42,12 @@ from downstream.new_tasks.schemas import (
 
 
 RELATION_FORMS = {
+    "regulates the expression of": "regulate",
+    "can affect the activity of": "affect_activity",
+    "affects the activity of": "affect_activity",
+    "has an indirect link with": "indirect_link",
+    "have an indirect link with": "indirect_link",
+    "are converted to": "convert",
     "activates": "activate",
     "activate": "activate",
     "activated": "activate",
@@ -101,13 +107,35 @@ RELATION_FORMS = {
     "is shared in successive reactions with": "successive_reaction_link",
     "is shared in successive reactions": "successive_reaction_link",
 }
-PARSER_VERSION = "atomic_relation_v1"
+PARSER_VERSION = "atomic_relation_v2"
 RELATION_RE = re.compile(
-    r"\b(" + "|".join(sorted((re.escape(value) for value in RELATION_FORMS), key=len, reverse=True)) + r")\b",
+    r"(?<![\w-])(" + "|".join(sorted((re.escape(value) for value in RELATION_FORMS), key=len, reverse=True)) + r")(?![\w-])",
     flags=re.IGNORECASE,
 )
 CLAUSE_SPLIT_RE = re.compile(r"(?:\s*[.;!?]\s+|\s*;\s*|\n+)")
 STEP_PREFIX_RE = re.compile(r"^\s*(?:step|substep)\s*\d+(?:\.\d+)?\s*[:.)-]\s*", re.IGNORECASE)
+TAGGED_ARGUMENT_RE = re.compile(
+    r"^(?:gene|protein|metabolite|compound|component|enzyme|pathway)\s+(.+)$",
+    flags=re.IGNORECASE,
+)
+TAGGED_ARGUMENT_SPLIT_RE = re.compile(
+    r"\s+(?:and|or)\s+(?=(?:gene|protein|metabolite|compound|component|enzyme|pathway)\s+)",
+    flags=re.IGNORECASE,
+)
+ARGUMENT_LEADING_RE = re.compile(
+    r"^(?:(?:the\s+)?(?:expression|activity)\s+of|between|of|to)\s+",
+    flags=re.IGNORECASE,
+)
+ARGUMENT_TRAILING_RE = re.compile(
+    r"\s+(?:"
+    r"in\s+an?\s+(?:ir)?reversible\s+way"
+    r"|at\s+the\s+pathway\s+level"
+    r"|via\s+(?:gene|protein|metabolite|compound|component|enzyme|pathway)\s+"
+    r"|and\s+exerts?\s+an?\s+indirect\s+effect"
+    r"|in\s+this\s+pathway"
+    r").*$",
+    flags=re.IGNORECASE,
+)
 
 
 def _normalized_text(value: str) -> str:
@@ -116,6 +144,22 @@ def _normalized_text(value: str) -> str:
 
 def _argument_terms(value: str) -> tuple[str, ...]:
     cleaned = STEP_PREFIX_RE.sub("", value).strip(" \t\n,;:.")
+    cleaned = ARGUMENT_LEADING_RE.sub("", cleaned)
+    cleaned = ARGUMENT_TRAILING_RE.sub("", cleaned).strip(" \t\n,;:.")
+    tagged_terms: list[str] = []
+    parts = TAGGED_ARGUMENT_SPLIT_RE.split(cleaned)
+    for part in parts:
+        match = TAGGED_ARGUMENT_RE.match(part.strip(" \t\n,;:."))
+        if match is None:
+            tagged_terms = []
+            break
+        normalized = _normalized_text(match.group(1))
+        if not normalized:
+            tagged_terms = []
+            break
+        tagged_terms.append(normalized)
+    if tagged_terms:
+        return tuple(sorted(set(tagged_terms)))
     entities = extract_entities(cleaned)
     if entities:
         return tuple(sorted(entity.casefold() for entity in entities))

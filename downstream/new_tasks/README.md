@@ -142,7 +142,7 @@ publishable Task 1 table should freeze parser version, inspect parse failures,
 and preferably export explicit structured gold substeps before inference.
 The manifest pins `dataset_id`, held-out `split`, immutable model checkpoint,
 and parser version. This implementation requires
-`parser_version: "atomic_relation_v1"`; use `ordering_mode: "layer_set"` for
+`parser_version: "atomic_relation_v2"`; use `ordering_mode: "layer_set"` for
 the current graph-layer data.
 
 ## Task 2 manifest and command
