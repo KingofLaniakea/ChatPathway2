@@ -58,7 +58,23 @@ def literal_string_set(node: ast.AST) -> set[str] | None:
     return values
 
 
-def declared_cli_options(module: str) -> dict[str, set[str] | None]:
+def declared_cli_options(
+    module: str,
+    *,
+    _visited: set[str] | None = None,
+) -> dict[str, set[str] | None]:
+    """Collect local options plus options from an explicitly imported parser.
+
+    Thin distributed entry points intentionally reuse the canonical
+    ``parse_args`` function rather than copying dozens of CLI declarations.
+    Following only explicit ``from ... import parse_args`` imports keeps this
+    static audit strict while supporting that single-source-of-truth pattern.
+    """
+
+    visited = set(_visited or ())
+    if module in visited:
+        return {}
+    visited.add(module)
     path = module_to_file(module)
     if not path.is_file():
         return {}
@@ -78,6 +94,11 @@ def declared_cli_options(module: str) -> dict[str, set[str] | None]:
         for arg in node.args:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith("--"):
                 options[arg.value.split("=", 1)[0]] = choices
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        if any(alias.name == "parse_args" for alias in node.names):
+            options.update(declared_cli_options(node.module, _visited=visited))
     return options
 
 
