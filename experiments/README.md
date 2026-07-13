@@ -90,6 +90,16 @@ python -m experiments.run_cfff_matrix \
   --gpus 0,1,2,3
 ```
 
+To evaluate only the shared-SFT baseline without launching AE or any stage-2
+arm, select the dependency-closed baseline subgraph explicitly:
+
+```bash
+python -m experiments.run_cfff_matrix \
+  --seeds 20260711 \
+  --gpus 0,1,2,3 \
+  --only-baseline-inference
+```
+
 It runs the three SFT prerequisites sequentially with all four GPUs, then fills
 the GPUs with independent AE, stage-2 control/HNN/forced-damped jobs and
 inference shards as their dependencies become available. The merge rejects a

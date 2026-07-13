@@ -6,7 +6,11 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from experiments.run_cfff_matrix import build_jobs, run_scheduler
+from experiments.run_cfff_matrix import (
+    build_jobs,
+    run_scheduler,
+    select_baseline_inference_jobs,
+)
 
 
 class CfffMatrixSchedulerTests(unittest.TestCase):
@@ -74,6 +78,25 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
                     dry_run=True,
                 )
         self.assertEqual(result, 0)
+
+    def test_baseline_only_keeps_sft_dependency_four_shards_and_merge(self) -> None:
+        selected = select_baseline_inference_jobs(build_jobs([11], Path("/assets"), "/python"))
+        keys = {job.key for job in selected}
+
+        self.assertEqual(len(selected), 6)
+        self.assertEqual(
+            keys,
+            {
+                "11:sft",
+                "11:exp000:infer",
+                "11:exp000:infer:shard0",
+                "11:exp000:infer:shard1",
+                "11:exp000:infer:shard2",
+                "11:exp000:infer:shard3",
+            },
+        )
+        for job in selected:
+            self.assertTrue(set(job.dependencies).issubset(keys))
 
 
 if __name__ == "__main__":

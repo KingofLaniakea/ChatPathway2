@@ -298,6 +298,28 @@ def build_jobs(
     return jobs
 
 
+def select_baseline_inference_jobs(jobs: Iterable[Job]) -> list[Job]:
+    """Keep only SFT prerequisites and the four-shard exp000 evaluation."""
+
+    selected = [
+        job
+        for job in jobs
+        if job.key.endswith(":sft") or ":exp000:infer" in job.key
+    ]
+    selected_keys = {job.key for job in selected}
+    unresolved = {
+        dependency
+        for job in selected
+        for dependency in job.dependencies
+        if dependency not in selected_keys
+    }
+    if unresolved:
+        raise ValueError(
+            "baseline-only selection lost dependencies: " + ", ".join(sorted(unresolved))
+        )
+    return selected
+
+
 def command_string(command: tuple[str, ...]) -> str:
     import shlex
 
@@ -443,6 +465,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpus", type=parse_csv_strings, default=parse_csv_strings("0,1,2,3"))
     parser.add_argument("--profile", default="cfff")
     parser.add_argument("--inference-shards", type=int, default=4)
+    parser.add_argument(
+        "--only-baseline-inference",
+        action="store_true",
+        help="Run only completed/shared SFT prerequisites and exp000 inference shards/merge.",
+    )
     parser.add_argument("--log-dir")
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
@@ -466,6 +493,8 @@ def main() -> None:
         sys.executable,
         inference_shards=args.inference_shards,
     )
+    if args.only_baseline_inference:
+        jobs = select_baseline_inference_jobs(jobs)
     log_dir = Path(args.log_dir) if args.log_dir else root / "runs/cfff_matrix_scheduler"
     raise SystemExit(
         run_scheduler(
