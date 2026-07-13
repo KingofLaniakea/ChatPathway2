@@ -14,6 +14,7 @@ import inspect
 import logging
 import math
 import os
+import platform
 from contextlib import nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -23,6 +24,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
+import peft
+import transformers
 from peft import PeftModel
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Sampler
@@ -261,6 +264,26 @@ def _average_dynamics_gradients(
             parameter.grad = gradient
 
 
+def maximum_parameter_rank_disagreement(
+    module: nn.Module,
+    *,
+    distributed: bool,
+    device: str,
+) -> float:
+    """Return the largest absolute parameter difference from rank zero."""
+
+    if not distributed:
+        return 0.0
+    maximum = torch.zeros((), dtype=torch.float32, device=device)
+    for parameter in module.parameters():
+        reference = parameter.detach().clone()
+        dist.broadcast(reference, src=0)
+        difference = (parameter.detach() - reference).abs().max().float()
+        maximum = torch.maximum(maximum, difference)
+    dist.all_reduce(maximum, op=dist.ReduceOp.MAX)
+    return float(maximum.item())
+
+
 def _reduce_metrics(
     loss_sums: dict[str, float],
     counters: dict[str, int],
@@ -354,6 +377,7 @@ def train(cfg: TrainConfig | None = None) -> None:
             write_json(save_root / "run_config.json", asdict(cfg))
 
         train_frame, validation_frame = load_frames(cfg)
+        compatibility_patch_applied = ensure_peft_transformers_compatibility()
         if is_main:
             manifest: dict[str, Any] = {
                 "git_commit": git_commit(Path(__file__).resolve().parents[2]),
@@ -370,6 +394,16 @@ def train(cfg: TrainConfig | None = None) -> None:
                 "base_model_identity": base_model_identity(cfg.base_model),
                 "sft_adapter_sha256": artifact_sha256(cfg.sft_lora),
                 "ae_checkpoint_sha256": artifact_sha256(cfg.ae_checkpoint),
+                "runtime": {
+                    "python": platform.python_version(),
+                    "torch": str(torch.__version__),
+                    "cuda_runtime": str(torch.version.cuda),
+                    "nccl": str(torch.cuda.nccl.version()) if distributed else None,
+                    "peft": str(peft.__version__),
+                    "transformers": str(transformers.__version__),
+                    "gpu": torch.cuda.get_device_name(local_rank) if device.startswith("cuda") else "cpu",
+                    "peft_transformers_compatibility_marker_installed": compatibility_patch_applied,
+                },
                 "distributed": {
                     "backend": "nccl" if distributed else "none",
                     "world_size": world_size,
@@ -406,6 +440,10 @@ def train(cfg: TrainConfig | None = None) -> None:
                 world_size,
                 effective_global_batch_size(cfg, world_size),
             )
+            if compatibility_patch_applied:
+                logger.info(
+                    "installed non-TP EmbeddingParallel compatibility marker for PEFT/Transformers"
+                )
 
         tokenizer = AutoTokenizer.from_pretrained(cfg.base_model, trust_remote_code=True)
         if tokenizer.pad_token is None:
@@ -419,11 +457,6 @@ def train(cfg: TrainConfig | None = None) -> None:
         base_model.config.use_cache = False
         if cfg.gradient_checkpointing:
             base_model.gradient_checkpointing_enable()
-        compatibility_patch_applied = ensure_peft_transformers_compatibility()
-        if is_main and compatibility_patch_applied:
-            logger.info(
-                "installed non-TP EmbeddingParallel compatibility marker for PEFT/Transformers"
-            )
         model: nn.Module = PeftModel.from_pretrained(
             base_model,
             cfg.sft_lora,
@@ -577,6 +610,16 @@ def train(cfg: TrainConfig | None = None) -> None:
                         align=f"{float(losses['align'].detach().item()):.3f}",  # type: ignore[union-attr]
                     )
 
+            dynamics_rank_disagreement = maximum_parameter_rank_disagreement(
+                dynamics,
+                distributed=distributed,
+                device=device,
+            )
+            if dynamics_rank_disagreement > 1e-6:
+                raise RuntimeError(
+                    "dynamics parameters diverged across ranks: "
+                    f"max_abs_difference={dynamics_rank_disagreement:.9g}"
+                )
             train_metrics = _reduce_metrics(
                 sums,
                 counters,
@@ -602,6 +645,7 @@ def train(cfg: TrainConfig | None = None) -> None:
                 "dynamics_learning_rate": optimizer.param_groups[1]["lr"],
                 "distributed_world_size": world_size,
                 "effective_global_batch_size": effective_global_batch_size(cfg, world_size),
+                "dynamics_max_rank_disagreement": dynamics_rank_disagreement,
             }
             improved, should_stop = early_stopping.update(
                 float(validation_metrics["total"]),
