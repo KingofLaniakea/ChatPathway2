@@ -18,5 +18,6 @@ if __name__ == "__main__":
             "--require-complete", seeded_asset_path("checkpoints/shared/pathway_sft/run_complete.json"),
             "--input", asset_path("data/test_kegg_pathway_eval.csv"),
             "--output", seeded_asset_path("runs/experiments/exp000_sft_only_direct/direct.csv"),
+            "--progress-output", seeded_asset_path("runs/experiments/exp000_sft_only_direct/direct.progress.jsonl"),
         ],
     )

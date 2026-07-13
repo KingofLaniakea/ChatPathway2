@@ -27,6 +27,7 @@ class InferenceConfig:
     trained_lora_path: str
     test_data_path: str
     output_data_path: str
+    progress_data_path: str | None
     batch_size: int
     max_length: int
     max_new_tokens: int
@@ -46,6 +47,11 @@ def parse_args() -> InferenceConfig:
     parser.add_argument("--adapter", default=DEFAULT_ADAPTER)
     parser.add_argument("--input", default=DEFAULT_INPUT, help="Input CSV; must contain a question column.")
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help="Prediction CSV to create.")
+    parser.add_argument(
+        "--progress-output",
+        dest="progress_data_path",
+        help="Append one auditable JSON record per completed sample; defaults beside --output.",
+    )
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--max-length", type=int, default=1072)
     parser.add_argument("--max-new-tokens", type=int, default=1024)
@@ -64,6 +70,7 @@ def parse_args() -> InferenceConfig:
         trained_lora_path=args.adapter,
         test_data_path=args.input,
         output_data_path=args.output,
+        progress_data_path=args.progress_data_path,
         batch_size=args.batch_size,
         max_length=args.max_length,
         max_new_tokens=args.max_new_tokens,
@@ -85,12 +92,25 @@ def run_inference(cfg: InferenceConfig) -> None:
         if marker.get("status") != "completed":
             raise ValueError(f"Training completion marker is not completed: {marker_path}")
     output_path = Path(cfg.output_data_path)
+    progress_path = (
+        Path(cfg.progress_data_path)
+        if cfg.progress_data_path
+        else output_path.with_suffix(".progress.jsonl")
+    )
     if output_path.exists() and not cfg.overwrite:
         raise FileExistsError(
             f"Refusing to overwrite existing output: {output_path}. "
             "Pass --overwrite only when replacement is intentional."
         )
+    if progress_path.exists():
+        if not cfg.overwrite:
+            raise FileExistsError(
+                f"Refusing to append to existing progress output: {progress_path}. "
+                "Pass --overwrite only when replacement is intentional."
+            )
+        progress_path.unlink()
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Using device: {cfg.device}")
     
     # 1. 初始化 Tokenizer
@@ -189,6 +209,7 @@ def run_inference(cfg: InferenceConfig) -> None:
             
         # 解码并提取 Assistant 回答部分
         for j, out_ids in enumerate(outputs):
+            sample_index = len(predicted_answers)
             # 获取输入 Prompt 的 token 长度，防止把 Prompt 重新打印出来
             input_len = inputs["input_ids"][j].shape[0]
             raw_gen_ids = out_ids[input_len:]
@@ -208,9 +229,12 @@ def run_inference(cfg: InferenceConfig) -> None:
             generated_count = int(actual_gen_ids.numel())
             generated_token_counts.append(generated_count)
             ended_with_eos = first_stop is not None
-            finish_reasons.append(
-                "eos" if ended_with_eos else ("max_new_tokens" if generated_count >= cfg.max_new_tokens else "stopped")
+            finish_reason = (
+                "eos"
+                if ended_with_eos
+                else ("max_new_tokens" if generated_count >= cfg.max_new_tokens else "stopped")
             )
+            finish_reasons.append(finish_reason)
             
             # 解码为文本
             gen_text = tokenizer.decode(actual_gen_ids, skip_special_tokens=False)
@@ -221,9 +245,32 @@ def run_inference(cfg: InferenceConfig) -> None:
             gen_text = gen_text.strip()
 
             parsed = parse_pathway_payload(gen_text, allow_text_fallback=False)
-            json_validity.append(parsed.json_valid)
-            schema_validity.append(parsed.schema_valid and bool(parsed.steps))
+            json_valid = parsed.json_valid
+            schema_valid = parsed.schema_valid and bool(parsed.steps)
+            json_validity.append(json_valid)
+            schema_validity.append(schema_valid)
             predicted_answers.append(gen_text)
+            source_row = rows[sample_index]
+            with progress_path.open("a", encoding="utf-8") as progress_handle:
+                progress_handle.write(
+                    json.dumps(
+                        {
+                            "sample_index": sample_index,
+                            "sample_id": source_row.get("sample_id", ""),
+                            "record_id": source_row.get("record_id", ""),
+                            "organism": source_row.get("organism", ""),
+                            "pathway_family_id": source_row.get("pathway_family_id", ""),
+                            "gold_answer": source_row.get("answer", ""),
+                            "predicted_answer": gen_text,
+                            "generated_token_count": generated_count,
+                            "finish_reason": finish_reason,
+                            "prediction_json_valid": json_valid,
+                            "prediction_schema_valid": schema_valid,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
             
     # 6. 将预测结果追加回 Dataframe，并维持原始列格式输出
     df["predicted_answer"] = predicted_answers
@@ -251,6 +298,8 @@ def run_inference(cfg: InferenceConfig) -> None:
                 "completion_marker_sha256": (
                     file_sha256(cfg.completion_marker) if cfg.completion_marker else None
                 ),
+                "progress_output": str(progress_path),
+                "progress_output_sha256": file_sha256(progress_path),
                 "input_rows": len(df),
                 "finish_reason_counts": {
                     str(key): int(value)

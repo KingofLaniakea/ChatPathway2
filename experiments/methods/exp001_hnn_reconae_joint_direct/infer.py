@@ -18,5 +18,6 @@ if __name__ == "__main__":
             "--require-complete", seeded_asset_path("checkpoints/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"),
             "--input", asset_path("data/test_kegg_pathway_eval.csv"),
             "--output", seeded_asset_path("runs/experiments/exp001_hnn_reconae_joint_direct/direct.csv"),
+            "--progress-output", seeded_asset_path("runs/experiments/exp001_hnn_reconae_joint_direct/direct.progress.jsonl"),
         ],
     )

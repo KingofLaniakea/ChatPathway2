@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-13b",
+  "version": "2026-07-13c",
   "asset_root": "/root/autodl-tmp",
   "rows": {
     "base000_shared_sft_reconae": {
@@ -57,7 +57,8 @@
         "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.csv",
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Stage-1 direct baseline."
     },
@@ -88,7 +89,8 @@
         "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.csv",
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Compute-matched stage-2 control: identical loop with all dynamics weights and dynamics LR zero."
     },
@@ -120,7 +122,8 @@
         "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Pure HNN with orthogonal Poisson structure and graph-layer/set targets."
     },
@@ -152,7 +155,8 @@
         "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv"
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Primary row: (J-rI) grad H + F(t), orthogonal Poisson J, isotropic PSD damping, direct inference."
     }

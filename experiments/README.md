@@ -39,6 +39,9 @@ reported metrics.
 Direct inference pins `max_new_tokens=1024`. On the 764-row strict core
 evaluation, the longest gold answer is 925 tokens (99th percentile 678), so
 the cap covers every gold target while bounding non-terminating repetition.
+Every completed sample is immediately appended to `direct.progress.jsonl`
+with its identity, gold answer, prediction, finish reason, and JSON/schema
+validity. The final CSV is still written only after the complete run.
 
 Checkpoint selection uses a deterministic `pathway_family_id` validation split,
 not a row or source-only split. For seeds `20260711/12/13`, validation contains

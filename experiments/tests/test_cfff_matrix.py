@@ -28,6 +28,10 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             Path("/assets/checkpoints/seeds/11/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"),
             by_key["11:exp001_hnn_reconae_joint_direct:train"].outputs,
         )
+        self.assertIn(
+            Path("/assets/runs/seeds/11/experiments/exp000_sft_only_direct/direct.progress.jsonl"),
+            by_key["11:exp000:infer"].outputs,
+        )
         for key in ("11:sft", "11:ae"):
             command = by_key[key].command
             self.assertEqual(command[command.index("--max-length") + 1], "8192")

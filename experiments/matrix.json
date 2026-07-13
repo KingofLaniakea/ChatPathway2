@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-13b",
+  "version": "2026-07-13c",
   "purpose": "Direct-inference controlled benchmark on the record-balanced 0.1% first-round KEGG training set with pathway-family-disjoint evaluation. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
   "dataset_profile": {
     "name": "record_balanced_0p1pct_family_disjoint_v2",
@@ -18,6 +18,7 @@
     "max_length": 8192,
     "inference_max_new_tokens": 1024,
     "measured_core_eval_gold_max_tokens": 925,
+    "streaming_progress_artifact": "direct.progress.jsonl (one gold/prediction audit record per completed sample)",
     "answer_budget_fraction": 0.5,
     "train_batch_size_per_process": 1,
     "measured_train_semantic_step_retention": 0.9916784555213448,

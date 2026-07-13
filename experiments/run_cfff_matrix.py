@@ -161,6 +161,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                 command=experiment_command(python, "infer", "exp000_sft_only_direct", seed),
                 outputs=(
                     run_root / "exp000_sft_only_direct/direct.csv",
+                    run_root / "exp000_sft_only_direct/direct.progress.jsonl",
                     run_root / "exp000_sft_only_direct/direct.run.json",
                 ),
             )
@@ -194,6 +195,7 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                     command=experiment_command(python, "infer", experiment_id, seed),
                     outputs=(
                         run_root / f"{experiment_id}/direct.csv",
+                        run_root / f"{experiment_id}/direct.progress.jsonl",
                         run_root / f"{experiment_id}/direct.run.json",
                     ),
                 )
