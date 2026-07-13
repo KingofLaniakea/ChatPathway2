@@ -34,6 +34,13 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             self.assertEqual(shard.command[shard.command.index("--shard-count") + 1], "4")
             self.assertEqual(shard.command[shard.command.index("--shard-index") + 1], str(index))
         self.assertIn("torch.distributed.run", by_key["11:sft"].command)
+        sft_command = by_key["11:sft"].command
+        self.assertEqual(sft_command[sft_command.index("--nproc_per_node") + 1], "4")
+        self.assertEqual(sft_command[sft_command.index("--batch-size") + 1], "1")
+        self.assertEqual(
+            sft_command[sft_command.index("--gradient-accumulation-steps") + 1],
+            "1",
+        )
         self.assertIn(Path("/assets/checkpoints/seeds/11/shared/pathway_sft/run_complete.json"), by_key["11:sft"].outputs)
         self.assertIn(Path("/assets/checkpoints/seeds/11/shared/pathway_reconstruction_ae/run_complete.json"), by_key["11:ae"].outputs)
         self.assertIn(

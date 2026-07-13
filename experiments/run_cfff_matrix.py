@@ -205,6 +205,8 @@ def build_jobs(
                     "-m",
                     "method.training.sft",
                     *controlled_training_budget_args(),
+                    "--gradient-accumulation-steps",
+                    "1",
                     "--base-model",
                     str(model),
                     "--train",
