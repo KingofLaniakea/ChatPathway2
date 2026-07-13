@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,12 @@ from method.training.common import (
     write_json,
 )
 from method.training.sequence import encode_supervised
+from method.training.csv_io import read_training_csv
+from method.training.prefix_sampling import (
+    EpochPrefixView,
+    PREFIX_POLICIES,
+    PREFIX_SAMPLING_MODES,
+)
 
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
@@ -56,6 +62,8 @@ class SFTConfig:
     epochs: int
     max_length: int
     answer_budget_fraction: float
+    prefix_sampling: str
+    prefix_policy: str
     text_column: str
     limit: int | None
     lora_r: int
@@ -81,18 +89,32 @@ class SFTDataset(Dataset):
         text_column: str,
         max_length: int,
         answer_budget_fraction: float,
+        prefix_sampling: str,
+        prefix_policy: str,
+        seed: int,
     ):
-        self.records = frame.to_dict(orient="records")
+        self.prefix_view = EpochPrefixView(
+            frame.to_dict(orient="records"),
+            sampling_mode=prefix_sampling,
+            policy=prefix_policy,
+            seed=seed,
+        )
         self.tokenizer = tokenizer
         self.text_column = text_column
         self.max_length = max_length
         self.answer_budget_fraction = answer_budget_fraction
 
     def __len__(self) -> int:
-        return len(self.records)
+        return len(self.prefix_view)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.prefix_view.set_epoch(epoch)
+
+    def selection_summary(self) -> dict[str, int]:
+        return self.prefix_view.selection_summary()
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        row = self.records[index]
+        row = self.prefix_view.row(index)
         question = str(row.get("question", ""))
         answer = str(row.get(self.text_column, row.get("answer", row.get("formatted_answer_no_phenotype", ""))))
         prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
@@ -150,6 +172,17 @@ def parse_args() -> SFTConfig:
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--max-length", type=int, default=1072)
     parser.add_argument("--answer-budget-fraction", type=float, default=0.5)
+    parser.add_argument(
+        "--prefix-sampling",
+        choices=PREFIX_SAMPLING_MODES,
+        default="all_rows",
+        help="Train every materialized prefix or one deterministic prefix per record per epoch.",
+    )
+    parser.add_argument(
+        "--prefix-policy",
+        choices=tuple(PREFIX_POLICIES),
+        default="sft_cycle",
+    )
     parser.add_argument("--text-column", default="answer")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--lora-r", type=int, default=64)
@@ -196,15 +229,15 @@ def unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
 
 
 def load_frames(cfg: SFTConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
-    frame = pd.read_csv(cfg.train_path, engine="c", quoting=csv.QUOTE_MINIMAL, on_bad_lines="error")
+    frame = read_training_csv(cfg.train_path)
     if cfg.limit is not None:
         frame = frame.head(cfg.limit)
     if "question" not in frame.columns:
         raise ValueError("training CSV must contain question")
+    if cfg.prefix_sampling == "one_per_record" and "record_id" not in frame.columns:
+        raise ValueError("one_per_record prefix sampling requires record_id")
     if cfg.validation_path:
-        validation = pd.read_csv(
-            cfg.validation_path, engine="c", quoting=csv.QUOTE_MINIMAL, on_bad_lines="error"
-        )
+        validation = read_training_csv(cfg.validation_path)
         if frame.empty or validation.empty:
             raise ValueError("training and explicit validation CSVs must both contain rows")
         ensure_disjoint_groups(
@@ -276,8 +309,36 @@ def train() -> None:
             "git_commit": git_commit(Path(__file__).resolve().parents[2]),
             "train_path": str(Path(cfg.train_path).resolve()),
             "validation_path": str(Path(cfg.validation_path).resolve()) if cfg.validation_path else "deterministic_group_split",
-            "train_rows": len(train_frame),
-            "validation_rows": len(validation_frame),
+            "train_eligible_prefix_rows": len(train_frame),
+            "train_records": (
+                int(train_frame["record_id"].nunique())
+                if "record_id" in train_frame.columns
+                else len(train_frame)
+            ),
+            "train_samples_per_epoch": (
+                int(train_frame["record_id"].nunique())
+                if cfg.prefix_sampling == "one_per_record"
+                else len(train_frame)
+            ),
+            "validation_prefix_rows": len(validation_frame),
+            "validation_records": (
+                int(validation_frame["record_id"].nunique())
+                if "record_id" in validation_frame.columns
+                else len(validation_frame)
+            ),
+            "validation_samples": (
+                int(validation_frame["record_id"].nunique())
+                if "record_id" in validation_frame.columns
+                else len(validation_frame)
+            ),
+            "validation_prefix_sampling": (
+                "one_per_record"
+                if "record_id" in validation_frame.columns
+                else "all_rows"
+            ),
+            "validation_prefix_policy": "balanced_cycle",
+            "prefix_sampling": cfg.prefix_sampling,
+            "prefix_policy": cfg.prefix_policy,
             "seed": cfg.seed,
             "base_model_identity": base_model_identity(cfg.base_model),
         }
@@ -286,7 +347,17 @@ def train() -> None:
             if cfg.validation_path:
                 manifest["validation_sha256"] = file_sha256(cfg.validation_path)
         write_json(save_root / "run_manifest.json", manifest)
-        logger.info("train_rows=%d validation_rows=%d seed=%d", len(train_frame), len(validation_frame), cfg.seed)
+        logger.info(
+            "train_eligible_prefix_rows=%d train_records=%d train_samples_per_epoch=%d "
+            "validation_prefix_rows=%d validation_records=%d validation_samples=%d seed=%d",
+            manifest["train_eligible_prefix_rows"],
+            manifest["train_records"],
+            manifest["train_samples_per_epoch"],
+            manifest["validation_prefix_rows"],
+            manifest["validation_records"],
+            manifest["validation_samples"],
+            cfg.seed,
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -322,6 +393,9 @@ def train() -> None:
         cfg.text_column,
         cfg.max_length,
         cfg.answer_budget_fraction,
+        cfg.prefix_sampling,
+        cfg.prefix_policy,
+        cfg.seed,
     )
     validation_dataset = SFTDataset(
         validation_frame,
@@ -329,7 +403,17 @@ def train() -> None:
         cfg.text_column,
         cfg.max_length,
         cfg.answer_budget_fraction,
+        "one_per_record" if "record_id" in validation_frame.columns else "all_rows",
+        "balanced_cycle",
+        cfg.seed,
     )
+    if is_main:
+        manifest["validation_prefix_selection"] = validation_dataset.selection_summary()
+        write_json(save_root / "run_manifest.json", manifest)
+        logger.info(
+            "validation_prefix_selection=%s",
+            json.dumps(manifest["validation_prefix_selection"], sort_keys=True),
+        )
     train_sampler = DistributedSampler(train_dataset, shuffle=True, seed=cfg.seed) if distributed else None
     train_loader = DataLoader(
         train_dataset,
@@ -352,14 +436,27 @@ def train() -> None:
     optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, cfg.epochs + 1):
+        train_dataset.set_epoch(epoch)
+        prefix_selection = train_dataset.selection_summary()
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
+        if is_main:
+            logger.info(
+                "epoch=%d train_samples=%d prefix_selection=%s",
+                epoch,
+                len(train_dataset),
+                json.dumps(prefix_selection, sort_keys=True),
+            )
         model.train()
+        train_started = time.perf_counter()
         train_total = 0.0
         train_steps = 0
         train_prompt_dropped = train_answer_dropped = 0
+        train_input_tokens = train_supervised_tokens = 0
         progress = tqdm(train_loader, desc=f"SFT epoch {epoch}", disable=not is_main)
         for step, batch in enumerate(progress):
+            train_input_tokens += int(batch["attention_mask"].sum().item())
+            train_supervised_tokens += int((batch["labels"] != -100).sum().item())
             outputs = model(
                 input_ids=batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device),
@@ -379,14 +476,24 @@ def train() -> None:
             if is_main:
                 progress.set_postfix(loss=f"{outputs.loss.item():.4f}")
 
+        train_seconds = time.perf_counter() - train_started
         train_avg = distributed_average(train_total, train_steps, device, distributed)
         train_counts = torch.tensor(
-            [train_prompt_dropped, train_answer_dropped],
+            [
+                train_prompt_dropped,
+                train_answer_dropped,
+                train_input_tokens,
+                train_supervised_tokens,
+            ],
             dtype=torch.int64,
             device=device,
         )
         if distributed:
             dist.all_reduce(train_counts, op=dist.ReduceOp.SUM)
+            elapsed = torch.tensor(train_seconds, dtype=torch.float64, device=device)
+            dist.all_reduce(elapsed, op=dist.ReduceOp.MAX)
+            train_seconds = float(elapsed.item())
+        validation_started = time.perf_counter()
         if distributed:
             value = torch.zeros(3, dtype=torch.float64, device=device)
             if is_main:
@@ -409,12 +516,22 @@ def train() -> None:
             val_avg = float(validation["loss"])
             val_prompt_dropped = int(validation["prompt_tokens_dropped"])
             val_answer_dropped = int(validation["answer_tokens_dropped"])
+        validation_seconds = time.perf_counter() - validation_started
         record = {
             "epoch": epoch,
+            "prefix_selection": prefix_selection,
             "train_loss": train_avg,
             "validation_loss": val_avg,
             "train_prompt_tokens_dropped": int(train_counts[0].item()),
             "train_answer_tokens_dropped": int(train_counts[1].item()),
+            "train_input_tokens": int(train_counts[2].item()),
+            "train_supervised_tokens": int(train_counts[3].item()),
+            "train_seconds": train_seconds,
+            "train_input_tokens_per_second": float(train_counts[2].item())
+            / max(train_seconds, 1e-9),
+            "train_supervised_tokens_per_second": float(train_counts[3].item())
+            / max(train_seconds, 1e-9),
+            "validation_seconds": validation_seconds,
             "validation_prompt_tokens_dropped": val_prompt_dropped,
             "validation_answer_tokens_dropped": val_answer_dropped,
             "lr": cfg.lr,
@@ -424,7 +541,15 @@ def train() -> None:
             history.append(record)
             append_jsonl(save_root / "metrics.jsonl", record)
             write_json(save_root / "history.json", history)
-            logger.info("epoch=%d train_loss=%.6f validation_loss=%.6f", epoch, train_avg, val_avg)
+            logger.info(
+                "epoch=%d train_loss=%.6f validation_loss=%.6f train_seconds=%.1f validation_seconds=%.1f supervised_tokens_per_second=%.1f",
+                epoch,
+                train_avg,
+                val_avg,
+                train_seconds,
+                validation_seconds,
+                record["train_supervised_tokens_per_second"],
+            )
             save_adapter(model, save_root / f"checkpoint_epoch_{epoch}")
             if improved:
                 save_adapter(model, save_root / "checkpoint_best")

@@ -147,6 +147,10 @@ class DatasetPipelineTests(unittest.TestCase):
                 {row["pathway_family_id"] for row in train_rows},
                 {"00001"},
             )
+            self.assertEqual(
+                {row["substep_source"] for row in train_rows},
+                {"processed_layer_items+sentence_parser_v1"},
+            )
             statuses_by_block = {
                 block: {row["phenotype_status"] for row in train_rows if row["pathway_block"] == block}
                 for block in {row["pathway_block"] for row in train_rows}

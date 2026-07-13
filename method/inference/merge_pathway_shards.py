@@ -18,7 +18,9 @@ from method.inference.csv_io import read_csv_text_rows
 PREDICTION_FIELDS = (
     "predicted_answer",
     "generated_token_count",
+    "total_generated_token_count",
     "finish_reason",
+    "generation_attempts",
     "prediction_json_valid",
     "prediction_schema_valid",
 )
@@ -29,6 +31,8 @@ SHARED_RUN_FIELDS = (
     "batch_size",
     "max_length",
     "max_new_tokens",
+    "max_json_attempts",
+    "retry_max_new_tokens",
     "limit",
     "shard_count",
     "seed",
@@ -226,17 +230,36 @@ def merge_shards(
         for field in ("predicted_answer", "finish_reason"):
             if str(progress_row.get(field, "")) != output_row[field]:
                 raise ValueError(f"CSV/progress mismatch at dataset index {index}: {field}")
-        if _index(
-            progress_row.get("generated_token_count"),
-            context=f"progress generated_token_count at dataset index {index}",
-        ) != _index(
-            output_row["generated_token_count"],
-            context=f"CSV generated_token_count at dataset index {index}",
+        for field in (
+            "generated_token_count",
+            "total_generated_token_count",
+            "generation_attempts",
         ):
-            raise ValueError(f"CSV/progress mismatch at dataset index {index}: generated_token_count")
+            if _index(
+                progress_row.get(field),
+                context=f"progress {field} at dataset index {index}",
+            ) != _index(
+                output_row[field],
+                context=f"CSV {field} at dataset index {index}",
+            ):
+                raise ValueError(f"CSV/progress mismatch at dataset index {index}: {field}")
+        attempts = _index(
+            output_row["generation_attempts"],
+            context=f"generation_attempts at dataset index {index}",
+        )
+        if not 1 <= attempts <= 3:
+            raise ValueError(
+                f"generation_attempts must be in [1, 3] at dataset index {index}"
+            )
         for field in ("prediction_json_valid", "prediction_schema_valid"):
             if _truth(progress_row.get(field)) != _truth(output_row[field]):
                 raise ValueError(f"CSV/progress mismatch at dataset index {index}: {field}")
+        if not _truth(output_row["prediction_json_valid"]) or not _truth(
+            output_row["prediction_schema_valid"]
+        ):
+            raise ValueError(f"strict-invalid prediction reached final shard at dataset index {index}")
+        if progress_row.get("status") != "completed":
+            raise ValueError(f"progress record is not completed at dataset index {index}")
     first_manifest = run_manifests[0][1]
     for field in SHARED_RUN_FIELDS:
         values = [manifest.get(field) for _, manifest in run_manifests]
@@ -260,6 +283,7 @@ def merge_shards(
     _atomic_jsonl(progress_destination, merged_progress)
 
     finish_counts = Counter(row["finish_reason"] for row in merged_rows)
+    attempt_counts = Counter(row["generation_attempts"] for row in merged_rows)
     metadata = {
         "merge_schema_version": 1,
         "git_commit": git_commit(Path(__file__).resolve().parents[2]),
@@ -286,6 +310,10 @@ def merge_shards(
             )
         ],
         "finish_reason_counts": dict(sorted(finish_counts.items())),
+        "generation_attempt_counts": dict(sorted(attempt_counts.items())),
+        "total_generated_tokens_including_repairs": sum(
+            int(row["total_generated_token_count"]) for row in merged_rows
+        ),
         "prediction_json_valid_count": sum(_truth(row["prediction_json_valid"]) for row in merged_rows),
         "prediction_schema_valid_count": sum(_truth(row["prediction_schema_valid"]) for row in merged_rows),
     }

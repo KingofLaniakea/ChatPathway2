@@ -14,8 +14,10 @@ from experiments.runtime_config import active_profile, asset_path
 
 DEFAULT_EXPERIMENT_SEED = "20260711"
 CONTROLLED_MAX_LENGTH = "8192"
-CONTROLLED_MAX_NEW_TOKENS = "1024"
+CONTROLLED_MAX_NEW_TOKENS = "4096"
+CONTROLLED_RETRY_MAX_NEW_TOKENS = "8192"
 CONTROLLED_TRAIN_BATCH_SIZE = "1"
+CONTROLLED_PREFIX_SAMPLING = "one_per_record"
 CONTROLLED_INFERENCE_BATCH_SIZE = "1"
 CONTROLLED_VALIDATION_GROUP_COLUMN = "pathway_family_id"
 
@@ -28,6 +30,8 @@ def controlled_training_budget_args() -> list[str]:
         CONTROLLED_MAX_LENGTH,
         "--batch-size",
         CONTROLLED_TRAIN_BATCH_SIZE,
+        "--prefix-sampling",
+        CONTROLLED_PREFIX_SAMPLING,
         "--validation-group-column",
         CONTROLLED_VALIDATION_GROUP_COLUMN,
     ]
@@ -43,6 +47,10 @@ def controlled_inference_budget_args() -> list[str]:
         CONTROLLED_MAX_LENGTH,
         "--max-new-tokens",
         CONTROLLED_MAX_NEW_TOKENS,
+        "--max-json-attempts",
+        "3",
+        "--retry-max-new-tokens",
+        CONTROLLED_RETRY_MAX_NEW_TOKENS,
     ]
 
 

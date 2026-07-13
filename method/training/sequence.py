@@ -9,6 +9,20 @@ from typing import Any
 from dataprocess.substeps import split_substeps
 
 
+class IncompleteSupervisionError(ValueError):
+    """Raised when a complete assistant JSON target cannot fit the token budget."""
+
+    def __init__(self, *, prompt_tokens: int, answer_tokens: int, max_length: int) -> None:
+        self.prompt_tokens = prompt_tokens
+        self.answer_tokens = answer_tokens
+        self.max_length = max_length
+        super().__init__(
+            "complete prompt+assistant JSON does not fit the token budget: "
+            f"prompt={prompt_tokens}, closed_answer={answer_tokens}, max_length={max_length}. "
+            "Drop or rematerialize this sample; assistant JSON must never be token-truncated."
+        )
+
+
 @dataclass(frozen=True)
 class EncodedSupervision:
     input_ids: list[int]
@@ -38,7 +52,22 @@ def pathway_step_substep_texts(answer_json: str) -> tuple[tuple[str, ...], ...]:
         payload = json.loads(answer_json)
     except json.JSONDecodeError:
         return ()
-    if not isinstance(payload, dict) or not isinstance(payload.get("remaining_steps"), list):
+    if not isinstance(payload, dict):
+        return ()
+    if isinstance(payload.get("remaining_layers"), list):
+        groups: list[tuple[str, ...]] = []
+        for layer in payload["remaining_layers"]:
+            if not isinstance(layer, dict) or not isinstance(layer.get("events"), list):
+                continue
+            values = tuple(
+                str(event.get("text", "")).strip()
+                for event in layer["events"]
+                if isinstance(event, dict) and str(event.get("text", "")).strip()
+            )
+            if values:
+                groups.append(values)
+        return tuple(groups)
+    if not isinstance(payload.get("remaining_steps"), list):
         return ()
     groups: list[tuple[str, ...]] = []
     for step in payload["remaining_steps"]:
@@ -127,21 +156,42 @@ def encode_supervised(
     *,
     max_length: int,
     answer_budget_fraction: float = 0.5,
+    truncation_policy: str = "error",
 ) -> EncodedSupervision:
     if max_length < 2:
         raise ValueError("max_length must be at least 2")
     if not 0 < answer_budget_fraction < 1:
         raise ValueError("answer_budget_fraction must be between 0 and 1")
+    if truncation_policy not in {"error", "measure"}:
+        raise ValueError("truncation_policy must be 'error' or 'measure'")
+    try:
+        payload = json.loads(answer_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("assistant supervision must be one complete JSON value") from exc
+    if not isinstance(payload, (dict, list)):
+        raise ValueError("assistant supervision JSON must be an object or list")
 
     prompt_ids = list(tokenizer.encode(prompt, add_special_tokens=False))
     answer_text = f"{answer_json}<|im_end|>"
     answer_ids, offsets = _answer_encoding(tokenizer, answer_text)
-    minimum_answer_budget = max(1, round(max_length * answer_budget_fraction))
-    answer_keep = min(len(answer_ids), minimum_answer_budget)
-    prompt_budget = max_length - answer_keep
-    kept_prompt = trim_prompt_ids(prompt_ids, prompt_budget)
-    remaining_budget = max_length - len(kept_prompt)
-    kept_answer = answer_ids[:remaining_budget]
+    if len(prompt_ids) + len(answer_ids) <= max_length:
+        kept_prompt = prompt_ids
+        kept_answer = answer_ids
+    elif truncation_policy == "error":
+        raise IncompleteSupervisionError(
+            prompt_tokens=len(prompt_ids),
+            answer_tokens=len(answer_ids),
+            max_length=max_length,
+        )
+    else:
+        # Retained only for retrospective coverage measurement. Trainers use
+        # the default fail-closed policy above.
+        minimum_answer_budget = max(1, round(max_length * answer_budget_fraction))
+        answer_keep = min(len(answer_ids), minimum_answer_budget)
+        prompt_budget = max_length - answer_keep
+        kept_prompt = trim_prompt_ids(prompt_ids, prompt_budget)
+        remaining_budget = max_length - len(kept_prompt)
+        kept_answer = answer_ids[:remaining_budget]
 
     text_groups = pathway_step_substep_texts(answer_json)
     char_groups = _find_substep_char_spans(answer_json, text_groups)
@@ -170,3 +220,12 @@ def encode_supervised(
         semantic_steps_total=len(text_groups),
         semantic_steps_retained=len(full_groups),
     )
+
+
+__all__ = [
+    "EncodedSupervision",
+    "IncompleteSupervisionError",
+    "encode_supervised",
+    "pathway_step_substep_texts",
+    "trim_prompt_ids",
+]

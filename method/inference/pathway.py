@@ -10,8 +10,8 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-from downstream.common.pathway_json import parse_pathway_payload
 from method.inference.csv_io import read_csv_text_rows, select_strided_shard
+from method.inference.json_retry import generation_validity, repair_prompt, retry_token_budget
 from method.training.common import file_sha256, git_commit, seed_everything
 from method.training.sequence import trim_prompt_ids
 
@@ -31,6 +31,8 @@ class InferenceConfig:
     batch_size: int
     max_length: int
     max_new_tokens: int
+    max_json_attempts: int
+    retry_max_new_tokens: int
     limit: int | None
     shard_count: int
     shard_index: int
@@ -38,6 +40,14 @@ class InferenceConfig:
     device: str
     overwrite: bool
     completion_marker: str | None
+
+
+@dataclass(frozen=True)
+class GenerationAttempt:
+    text: str
+    generated_token_count: int
+    finish_reason: str
+    max_new_tokens: int
 
 
 def parse_args() -> InferenceConfig:
@@ -54,9 +64,21 @@ def parse_args() -> InferenceConfig:
         dest="progress_data_path",
         help="Append one auditable JSON record per completed sample; defaults beside --output.",
     )
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--max-length", type=int, default=1072)
-    parser.add_argument("--max-new-tokens", type=int, default=1024)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--max-length", type=int, default=8192)
+    parser.add_argument("--max-new-tokens", type=int, default=4096)
+    parser.add_argument(
+        "--max-json-attempts",
+        type=int,
+        default=3,
+        help="Generate, repair, and fail explicitly if strict JSON is still invalid.",
+    )
+    parser.add_argument(
+        "--retry-max-new-tokens",
+        type=int,
+        default=8192,
+        help="Maximum output budget used by the final JSON repair attempt.",
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument(
         "--shard-count",
@@ -83,6 +105,10 @@ def parse_args() -> InferenceConfig:
         parser.error("--shard-count must be positive")
     if not 0 <= args.shard_index < args.shard_count:
         parser.error("--shard-index must be in [0, --shard-count)")
+    if args.max_json_attempts != 3:
+        parser.error("--max-json-attempts must be 3 for the maintained inference contract")
+    if args.retry_max_new_tokens < args.max_new_tokens:
+        parser.error("--retry-max-new-tokens must be at least --max-new-tokens")
     return InferenceConfig(
         base_model_id=args.base_model,
         trained_lora_path=args.adapter,
@@ -92,6 +118,8 @@ def parse_args() -> InferenceConfig:
         batch_size=args.batch_size,
         max_length=args.max_length,
         max_new_tokens=args.max_new_tokens,
+        max_json_attempts=args.max_json_attempts,
+        retry_max_new_tokens=args.retry_max_new_tokens,
         limit=args.limit,
         shard_count=args.shard_count,
         shard_index=args.shard_index,
@@ -100,6 +128,79 @@ def parse_args() -> InferenceConfig:
         overwrite=args.overwrite,
         completion_marker=args.completion_marker,
     )
+
+
+def generate_batch(
+    model,
+    tokenizer,
+    prompts: list[str],
+    *,
+    prompt_budget: int,
+    max_new_tokens: int,
+    device: str,
+    stop_ids: set[int],
+) -> list[GenerationAttempt]:
+    batch_ids = [
+        trim_prompt_ids(
+            list(tokenizer.encode(prompt, add_special_tokens=False)),
+            prompt_budget,
+        )
+        for prompt in prompts
+    ]
+    inputs = tokenizer.pad(
+        {
+            "input_ids": batch_ids,
+            "attention_mask": [[1] * len(ids) for ids in batch_ids],
+        },
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+    with torch.no_grad():
+        outputs = model.generate(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=sorted(stop_ids),
+        )
+
+    results: list[GenerationAttempt] = []
+    padded_input_length = int(inputs["input_ids"].shape[1])
+    for out_ids in outputs:
+        raw_gen_ids = out_ids[padded_input_length:]
+        raw_values = raw_gen_ids.tolist()
+        first_stop = next(
+            (
+                index
+                for index, token in enumerate(raw_values)
+                if int(token) in stop_ids
+            ),
+            None,
+        )
+        actual_gen_ids = (
+            raw_gen_ids[: first_stop + 1]
+            if first_stop is not None
+            else raw_gen_ids
+        )
+        generated_count = int(actual_gen_ids.numel())
+        finish_reason = (
+            "eos"
+            if first_stop is not None
+            else ("max_new_tokens" if generated_count >= max_new_tokens else "stopped")
+        )
+        text = tokenizer.decode(actual_gen_ids, skip_special_tokens=False)
+        if "<|im_end|>" in text:
+            text = text.split("<|im_end|>", 1)[0]
+        results.append(
+            GenerationAttempt(
+                text=text.strip(),
+                generated_token_count=generated_count,
+                finish_reason=finish_reason,
+                max_new_tokens=max_new_tokens,
+            )
+        )
+    return results
 
 
 def run_inference(cfg: InferenceConfig) -> None:
@@ -186,7 +287,9 @@ def run_inference(cfg: InferenceConfig) -> None:
         
     predicted_answers = []
     generated_token_counts = []
+    total_generated_token_counts = []
     finish_reasons = []
+    generation_attempt_counts = []
     json_validity = []
     schema_validity = []
 
@@ -210,105 +313,107 @@ def run_inference(cfg: InferenceConfig) -> None:
     print("Starting batch inference...")
     for i in tqdm(range(0, len(prompts), cfg.batch_size), desc="Inferencing"):
         batch_prompts = prompts[i : i + cfg.batch_size]
-        
-        # 编码并Padding
-        batch_ids = [
-            trim_prompt_ids(
-                list(tokenizer.encode(prompt, add_special_tokens=False)),
-                cfg.max_length,
-            )
-            for prompt in batch_prompts
-        ]
-        inputs = tokenizer.pad(
-            {
-                "input_ids": batch_ids,
-                "attention_mask": [[1] * len(ids) for ids in batch_ids],
-            },
-            padding=True,
-            return_tensors="pt",
-        ).to(cfg.device)
-        
-        # 生成配置
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_new_tokens=cfg.max_new_tokens,
-                do_sample=False,  # 选用 Greedy Search 确保确定性生物事实输出
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=sorted(stop_ids),
-            )
-            
-        # 解码并提取 Assistant 回答部分
-        for j, out_ids in enumerate(outputs):
-            local_sample_index = len(predicted_answers)
-            sample_index = source_indices[local_sample_index]
-            # 获取输入 Prompt 的 token 长度，防止把 Prompt 重新打印出来
-            input_len = inputs["input_ids"][j].shape[0]
-            raw_gen_ids = out_ids[input_len:]
-            first_stop = next(
-                (
-                    index
-                    for index, token in enumerate(raw_gen_ids.tolist())
-                    if int(token) in stop_ids
-                ),
-                None,
-            )
-            actual_gen_ids = (
-                raw_gen_ids[: first_stop + 1]
-                if first_stop is not None
-                else raw_gen_ids
-            )
-            generated_count = int(actual_gen_ids.numel())
-            generated_token_counts.append(generated_count)
-            ended_with_eos = first_stop is not None
-            finish_reason = (
-                "eos"
-                if ended_with_eos
-                else ("max_new_tokens" if generated_count >= cfg.max_new_tokens else "stopped")
-            )
-            finish_reasons.append(finish_reason)
-            
-            # 解码为文本
-            gen_text = tokenizer.decode(actual_gen_ids, skip_special_tokens=False)
-            
-            # 清洗遗留的特殊结束符标签
-            if "<|im_end|>" in gen_text:
-                gen_text = gen_text.split("<|im_end|>")[0]
-            gen_text = gen_text.strip()
+        initial_results = generate_batch(
+            model,
+            tokenizer,
+            batch_prompts,
+            prompt_budget=cfg.max_length,
+            max_new_tokens=cfg.max_new_tokens,
+            device=cfg.device,
+            stop_ids=stop_ids,
+        )
 
-            parsed = parse_pathway_payload(gen_text, allow_text_fallback=False)
-            json_valid = parsed.json_valid
-            schema_valid = parsed.schema_valid and bool(parsed.steps)
-            json_validity.append(json_valid)
-            schema_validity.append(schema_valid)
-            predicted_answers.append(gen_text)
+        for j, initial in enumerate(initial_results):
+            local_sample_index = i + j
+            sample_index = source_indices[local_sample_index]
             source_row = rows[local_sample_index]
+            try:
+                expected_first_layer = int(source_row.get("prefix_step_count", ""))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Input CSV must contain an integer prefix_step_count for strict v3 inference"
+                ) from exc
+            attempt_history = [initial]
+            current = initial
+            json_valid, schema_valid, validation_error = generation_validity(
+                current.text,
+                expected_first_layer=expected_first_layer,
+            )
+            for attempt in range(2, cfg.max_json_attempts + 1):
+                if schema_valid:
+                    break
+                repaired_prompt = repair_prompt(
+                    batch_prompts[j],
+                    current.text,
+                    validation_error,
+                    attempt,
+                )
+                current = generate_batch(
+                    model,
+                    tokenizer,
+                    [repaired_prompt],
+                    prompt_budget=cfg.max_length,
+                    max_new_tokens=retry_token_budget(
+                        max_new_tokens=cfg.max_new_tokens,
+                        retry_max_new_tokens=cfg.retry_max_new_tokens,
+                        max_json_attempts=cfg.max_json_attempts,
+                        attempt=attempt,
+                    ),
+                    device=cfg.device,
+                    stop_ids=stop_ids,
+                )[0]
+                attempt_history.append(current)
+                json_valid, schema_valid, validation_error = generation_validity(
+                    current.text,
+                    expected_first_layer=expected_first_layer,
+                )
+
+            progress_record = {
+                "sample_index": sample_index,
+                "sample_id": source_row.get("sample_id", ""),
+                "record_id": source_row.get("record_id", ""),
+                "organism": source_row.get("organism", ""),
+                "pathway_family_id": source_row.get("pathway_family_id", ""),
+                "gold_answer": source_row.get("answer", ""),
+                "predicted_answer": current.text,
+                "generation_attempts": len(attempt_history),
+                "generation_attempt_history": [asdict(value) for value in attempt_history],
+                "generated_token_count": current.generated_token_count,
+                "total_generated_token_count": sum(
+                    value.generated_token_count for value in attempt_history
+                ),
+                "finish_reason": current.finish_reason,
+                "prediction_json_valid": json_valid,
+                "prediction_schema_valid": schema_valid,
+                "validation_error": validation_error,
+                "status": "completed" if schema_valid else "failed_after_three_attempts",
+            }
             with progress_path.open("a", encoding="utf-8") as progress_handle:
                 progress_handle.write(
-                    json.dumps(
-                        {
-                            "sample_index": sample_index,
-                            "sample_id": source_row.get("sample_id", ""),
-                            "record_id": source_row.get("record_id", ""),
-                            "organism": source_row.get("organism", ""),
-                            "pathway_family_id": source_row.get("pathway_family_id", ""),
-                            "gold_answer": source_row.get("answer", ""),
-                            "predicted_answer": gen_text,
-                            "generated_token_count": generated_count,
-                            "finish_reason": finish_reason,
-                            "prediction_json_valid": json_valid,
-                            "prediction_schema_valid": schema_valid,
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
+                    json.dumps(progress_record, ensure_ascii=False) + "\n"
                 )
+            if not schema_valid:
+                raise RuntimeError(
+                    "strict pathway JSON generation failed after three attempts: "
+                    f"sample_id={source_row.get('sample_id', '')!r}, error={validation_error}"
+                )
+
+            json_validity.append(json_valid)
+            schema_validity.append(schema_valid)
+            predicted_answers.append(current.text)
+            generated_token_counts.append(current.generated_token_count)
+            total_generated_token_counts.append(
+                sum(value.generated_token_count for value in attempt_history)
+            )
+            finish_reasons.append(current.finish_reason)
+            generation_attempt_counts.append(len(attempt_history))
             
     # 6. 将预测结果追加回 Dataframe，并维持原始列格式输出
     df["predicted_answer"] = predicted_answers
     df["generated_token_count"] = generated_token_counts
+    df["total_generated_token_count"] = total_generated_token_counts
     df["finish_reason"] = finish_reasons
+    df["generation_attempts"] = generation_attempt_counts
     df["prediction_json_valid"] = json_validity
     df["prediction_schema_valid"] = schema_validity
     
@@ -339,6 +444,13 @@ def run_inference(cfg: InferenceConfig) -> None:
                     str(key): int(value)
                     for key, value in df["finish_reason"].value_counts().items()
                 },
+                "generation_attempt_counts": {
+                    str(key): int(value)
+                    for key, value in df["generation_attempts"].value_counts().items()
+                },
+                "total_generated_tokens_including_repairs": int(
+                    df["total_generated_token_count"].sum()
+                ),
                 "prediction_json_valid_count": int(df["prediction_json_valid"].sum()),
                 "prediction_schema_valid_count": int(df["prediction_schema_valid"].sum()),
             },

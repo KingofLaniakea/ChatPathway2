@@ -37,7 +37,9 @@ class MergePathwayShardsTests(unittest.TestCase):
                 *source_fields,
                 "predicted_answer",
                 "generated_token_count",
+                "total_generated_token_count",
                 "finish_reason",
+                "generation_attempts",
                 "prediction_json_valid",
                 "prediction_schema_valid",
             ]
@@ -53,7 +55,9 @@ class MergePathwayShardsTests(unittest.TestCase):
                         **source_rows[index],
                         "predicted_answer": f"p{index}",
                         "generated_token_count": 10 + index,
+                        "total_generated_token_count": 10 + index,
                         "finish_reason": "eos",
+                        "generation_attempts": 1,
                         "prediction_json_valid": True,
                         "prediction_schema_valid": True,
                     }
@@ -72,9 +76,12 @@ class MergePathwayShardsTests(unittest.TestCase):
                                 "gold_answer": source_rows[index]["answer"],
                                 "predicted_answer": f"p{index}",
                                 "generated_token_count": 10 + index,
+                                "total_generated_token_count": 10 + index,
                                 "finish_reason": "eos",
+                                "generation_attempts": 1,
                                 "prediction_json_valid": True,
                                 "prediction_schema_valid": True,
+                                "status": "completed",
                             }
                         )
                         + "\n"
@@ -89,6 +96,8 @@ class MergePathwayShardsTests(unittest.TestCase):
                     "batch_size": 1,
                     "max_length": 8192,
                     "max_new_tokens": 1024,
+                    "max_json_attempts": 3,
+                    "retry_max_new_tokens": 8192,
                     "limit": None,
                     "shard_count": 2,
                     "shard_index": shard_index,
@@ -137,11 +146,12 @@ class MergePathwayShardsTests(unittest.TestCase):
                 [
                     "dataset_index", "sample_id", "question", "answer", "predicted_answer",
                     "generated_token_count", "finish_reason", "prediction_json_valid",
-                    "prediction_schema_valid",
+                    "prediction_schema_valid", "total_generated_token_count", "generation_attempts",
                 ],
                 [{
                     "dataset_index": 0, "sample_id": "s0", "question": "q0", "answer": "a0",
                     "predicted_answer": "p0", "generated_token_count": 1, "finish_reason": "eos",
+                    "total_generated_token_count": 1, "generation_attempts": 1,
                     "prediction_json_valid": True, "prediction_schema_valid": True,
                 }],
             )

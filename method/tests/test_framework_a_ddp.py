@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import unittest
 
-from method.training.framework_a_ddp import (
-    MatchedGlobalBatchTrainSampler,
-    StridedEvaluationSampler,
-)
+try:
+    from method.training.framework_a_ddp import (
+        MatchedGlobalBatchTrainSampler,
+        StridedEvaluationSampler,
+    )
+except ModuleNotFoundError:  # Minimal local environments may omit PyTorch.
+    MatchedGlobalBatchTrainSampler = None  # type: ignore[assignment,misc]
+    StridedEvaluationSampler = None  # type: ignore[assignment,misc]
 
 
+@unittest.skipIf(StridedEvaluationSampler is None, "PyTorch is required")
 class StridedEvaluationSamplerTests(unittest.TestCase):
     def test_every_row_is_assigned_once_without_padding(self) -> None:
         source = list(range(11))
@@ -30,6 +35,7 @@ class StridedEvaluationSamplerTests(unittest.TestCase):
         self.assertEqual(lengths, [1, 1, 0, 0])
 
 
+@unittest.skipIf(MatchedGlobalBatchTrainSampler is None, "PyTorch is required")
 class MatchedGlobalBatchTrainSamplerTests(unittest.TestCase):
     @staticmethod
     def reconstruct_global_order(samplers: list[MatchedGlobalBatchTrainSampler]) -> list[int]:

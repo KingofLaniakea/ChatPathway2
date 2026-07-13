@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import hashlib
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -12,10 +14,61 @@ from experiments.run_cfff_matrix import (
     build_jobs,
     run_scheduler,
     select_baseline_inference_jobs,
+    validate_inputs,
 )
 
 
 class CfffMatrixSchedulerTests(unittest.TestCase):
+    def test_runtime_preflight_hashes_every_csv_and_record_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "models/qwen3_8B"
+            model.mkdir(parents=True)
+            (model / "config.json").write_text("{}\n", encoding="utf-8")
+            (model / "chatpathway_download_manifest.json").write_text(
+                "{}\n", encoding="utf-8"
+            )
+            data = root / "data/pathway_v3_cap256"
+            data.mkdir(parents=True)
+            csv_paths = {
+                "train": data / "train_pathway_continuation_v3_cap256.csv",
+                "validation": data / "validation_pathway_continuation_v3.csv",
+                "test": data / "test_pathway_continuation_v3.csv",
+            }
+            record_paths = {
+                split: data / f"{split}_pathway_records_v3.jsonl"
+                for split in csv_paths
+            }
+            for split, path in csv_paths.items():
+                path.write_text(f"{split}\n", encoding="utf-8")
+                record_paths[split].write_text(f'{{"split":"{split}"}}\n', encoding="utf-8")
+            manifest = data / "dataset_manifest.json"
+            manifest.write_text("{}\n", encoding="utf-8")
+
+            def digest(path: Path) -> str:
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+
+            audit = {
+                "status": "passed",
+                "strict_failures": [],
+                "manifest_sha256": digest(manifest),
+                "splits": {
+                    split: {
+                        "sha256": digest(csv_paths[split]),
+                        "record_jsonl": {"sha256": digest(record_paths[split])},
+                    }
+                    for split in csv_paths
+                },
+            }
+            audit_path = data / "data_audit.json"
+            audit_path.write_text(json.dumps(audit), encoding="utf-8")
+            audit_path.chmod(0o444)
+            validate_inputs(root)
+            record_paths["train"].chmod(0o644)
+            record_paths["train"].write_text("changed\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "train record JSONL changed"):
+                validate_inputs(root)
+
     def test_job_graph_uses_four_gpu_sft_and_four_disjoint_inference_shards(self) -> None:
         root = Path("/assets")
         jobs = build_jobs([11], root, "/python")

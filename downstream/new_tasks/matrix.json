@@ -17,10 +17,10 @@
       "id": "task1",
       "name": "Substep Conditional Step Prediction",
       "module": "downstream.new_tasks.task1_substep_csp",
-      "primary_input": "inference records with explicit remaining_substeps or conservatively parsed remaining_steps",
+      "primary_input": "v3 inference records with structured remaining_layers/events; historical v2 remaining_steps only through an audited parser fallback",
       "metrics": ["next-layer atomic-event multiset F1", "source/relation/target match", "ordered layer F1", "optional provenance-gated ordered substep F1"],
       "model_dependency": ["frozen prediction artifact"],
-      "status": "runnable; exact boundaries require a new JSON-to-CSV rebuild, while the current server full CSV is explicitly marked sentence_parser_v1",
+      "status": "v3 adapter runnable; formal scoring waits for the audited v3 release and predictions",
       "claim_boundary": "Ambiguous clauses are excluded; within-layer text order is not treated as causal without independent ordering provenance."
     },
     {

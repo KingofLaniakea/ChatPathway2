@@ -101,8 +101,74 @@ def _step_from_value(value: Any, position: int) -> tuple[PathwayStepValue | None
     return None, False
 
 
+def _v3_entity_valid(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"canonical_id", "name"}
+        and isinstance(value.get("canonical_id"), str)
+        and bool(value["canonical_id"].strip())
+        and isinstance(value.get("name"), str)
+        and bool(value["name"].strip())
+    )
+
+
+def _v3_layer_from_value(value: Any, position: int) -> tuple[PathwayStepValue | None, bool]:
+    if not isinstance(value, dict):
+        return None, False
+    layer_index = value.get("layer_index")
+    events = value.get("events")
+    shape_valid = (
+        set(value) == {"layer_index", "events"}
+        and isinstance(layer_index, int)
+        and not isinstance(layer_index, bool)
+        and isinstance(events, list)
+        and bool(events)
+    )
+    if not isinstance(events, list):
+        return None, False
+    texts: list[str] = []
+    events_valid = True
+    for event in events:
+        if not isinstance(event, dict):
+            events_valid = False
+            continue
+        text = str(event.get("text", "")).strip()
+        sources = event.get("source")
+        targets = event.get("target")
+        event_valid = (
+            set(event) == {"source", "relation", "target", "text"}
+            and isinstance(sources, list)
+            and bool(sources)
+            and all(_v3_entity_valid(item) for item in sources)
+            and isinstance(targets, list)
+            and bool(targets)
+            and all(_v3_entity_valid(item) for item in targets)
+            and isinstance(event.get("relation"), str)
+            and bool(event["relation"].strip())
+            and isinstance(event.get("text"), str)
+            and bool(text)
+        )
+        events_valid = events_valid and event_valid
+        if text:
+            texts.append(text)
+    if not texts:
+        return None, False
+    step_number = layer_index if isinstance(layer_index, int) and not isinstance(layer_index, bool) else None
+    layer = f"layer {step_number}" if step_number is not None else ""
+    return (
+        PathwayStepValue(
+            position=position,
+            step=step_number,
+            layer=layer,
+            text=" ".join(texts),
+            substeps=tuple(texts),
+        ),
+        shape_valid and events_valid and len(texts) == len(events),
+    )
+
+
 def parse_pathway_payload(value: Any, *, allow_text_fallback: bool = True) -> ParsedPathwayPayload:
-    """Parse current ``remaining_steps`` JSON and selected historical shapes.
+    """Parse v3 ``remaining_layers``, v2 ``remaining_steps``, and old shapes.
 
     ``json_valid`` is true only for syntactically valid JSON. ``schema_valid``
     additionally requires the maintained object shape and structured step
@@ -132,6 +198,42 @@ def parse_pathway_payload(value: Any, *, allow_text_fallback: bool = True) -> Pa
     phenotype = None
     schema_valid = True
     if isinstance(loaded, dict):
+        if "remaining_layers" in loaded:
+            raw_layers = loaded.get("remaining_layers")
+            if not isinstance(raw_layers, list):
+                return ParsedPathwayPayload(
+                    (),
+                    None,
+                    json_valid,
+                    False,
+                    "remaining_layers_is_not_list",
+                )
+            schema_valid = (
+                set(loaded) == {"schema_version", "remaining_layers"}
+                and loaded.get("schema_version") == "pathway_continuation_v3"
+                and bool(raw_layers)
+            )
+            parsed_layers: list[PathwayStepValue] = []
+            previous_layer_index: int | None = None
+            for position, raw_layer in enumerate(raw_layers):
+                layer, layer_schema_valid = _v3_layer_from_value(raw_layer, position)
+                if layer is None:
+                    schema_valid = False
+                    continue
+                if previous_layer_index is not None and (
+                    layer.step is None or layer.step != previous_layer_index + 1
+                ):
+                    layer_schema_valid = False
+                previous_layer_index = layer.step
+                parsed_layers.append(layer)
+                schema_valid = schema_valid and layer_schema_valid
+            return ParsedPathwayPayload(
+                tuple(parsed_layers),
+                None,
+                json_valid,
+                schema_valid,
+                error,
+            )
         if "remaining_steps" in loaded:
             raw_steps = loaded.get("remaining_steps")
             phenotype = loaded.get("predicted_phenotype")

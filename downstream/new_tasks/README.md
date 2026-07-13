@@ -5,7 +5,7 @@ not replace or mutate historical entry points under `downstream/tasks/`, so old
 artifacts remain reproducible.
 
 The detailed Chinese task definition and data-team handoff instructions are
-frozen in [FROZEN_TASK_SPEC_2026-07-13.md](FROZEN_TASK_SPEC_2026-07-13.md).
+frozen in [FROZEN_TASK_SPEC_2026-07-13.md](../../docs/FROZEN_TASK_SPEC_2026-07-13.md).
 
 The suite follows three non-negotiable rules:
 
@@ -26,7 +26,7 @@ Implementation provenance and deliberate corrections are in
 | Task | Scientific question | Required artifact | Reportable output |
 | --- | --- | --- | --- |
 | 0 AE/HNN self-consistency | Does the AE preserve hidden states, and does the learned ODE follow held-out latent trajectories? | NPZ hidden/reconstruction and observed/rollout latents, or observed latents plus `hamiltonian_dynamics.pt` | reconstruction MSE/cosine and rollout error curves at fixed horizons |
-| 1 substep CSP | Given a pathway prefix, are the next graph layer's atomic `A relation B` events and remaining layer sequence correct? | prediction CSV/JSON with explicit `remaining_substeps`, or parse-audited `remaining_steps` | layer-set event metrics by default; ordered-substep metrics only with causal-order provenance |
+| 1 substep CSP | Given a pathway prefix, are the next graph layer's atomic `A relation B` events and remaining layer sequence correct? | v3 prediction CSV/JSON with structured `remaining_layers/events`; v2 only through an audited fallback | layer-set event metrics by default; ordered-substep metrics only with causal-order provenance |
 | 2 PCTE | Are predicted and gold answer trajectories close in the same fixed latent representation? | paired latent NPZ plus representation manifest | DTW PCTE; not HNN self-consistency |
 | 3 causal reranking | Does the LLM rank a validated path above direction-reversed, shuffled, and unrelated candidates? | expert-validated candidate JSON/JSONL | LLM Top-1/MRR/rejection; optional validation-calibrated combined score |
 | 4 knockout/rescue | Do calibrated phenotype predictions match observed KO effects and rank true rescue interventions? | real intervention cases, test labels, validation-calibrated scorer | Brier/accuracy, KO direction, rescue Hit@1/MRR |
@@ -35,38 +35,40 @@ Implementation provenance and deliberate corrections are in
 
 ## Atomic substep schema
 
-The preferred Task 1 answer is:
+The preferred Task 1 answer is the same v3 continuation contract used by training:
 
 ```json
 {
-  "remaining_substeps": [
+  "schema_version": "pathway_continuation_v3",
+  "remaining_layers": [
     {
-      "step": 2,
-      "substep": 0,
-      "source": ["AKT1"],
-      "relation": "phosphorylates",
-      "target": ["BAD"],
-      "text": "AKT1 phosphorylates BAD"
+      "layer_index": 2,
+      "events": [
+        {
+          "source": [{"canonical_id": "hsa:207", "name": "AKT1"}],
+          "relation": "phosphorylation",
+          "target": [{"canonical_id": "hsa:572", "name": "BAD"}],
+          "text": "AKT1 phosphorylates BAD."
+        }
+      ]
     }
-  ],
-  "predicted_phenotype": null
+  ]
 }
 ```
 
-The adapter accepts the maintained multi-step `remaining_steps` JSON. It splits
-only sentence/semicolon clauses with exactly one supported relation. For
-example, `A activates B. B inhibits C.` becomes two substeps, while a clause
-with two relation verbs is rejected as ambiguous. Parser validity and excluded
-coverage are always emitted alongside accuracy.
+The adapter accepts v3 `remaining_layers/events` directly and scores canonical
+source/target IDs plus the structured relation without reparsing the event
+sentence. Historical v2 `remaining_steps` remains readable; only that fallback
+splits sentence/semicolon clauses with exactly one supported relation. Parser
+validity and excluded coverage are always emitted alongside accuracy.
 
-Important dataset boundary: `dataprocess/build_pathway_csv.py` now writes every
-original `source_item` as an explicit `substeps` entry, and this evaluator uses
-those boundaries directly. The already-generated 2026-07-11 full server CSV
-predates that schema, so `prepare_experiment_data.py` marks its recovered
-boundaries as `sentence_parser_v1`. If two legacy source items had no
-punctuation delimiter, their boundary cannot be reconstructed losslessly; the
-fallback parser reports that provenance and never treats sentence order as an
-independent causal-order annotation.
+Important dataset boundary: the active v3 builder reads canonical relation and
+reaction events from `processed_graph`. The 2026-07-11 full server CSV predates
+that schema, so `prepare_experiment_data.py` marks its recovered boundaries as
+`sentence_parser_v1`. If two legacy source items had no punctuation delimiter,
+their boundary cannot be reconstructed losslessly; the fallback parser reports
+that provenance and never treats sentence order as an independent causal-order
+annotation.
 
 Atomic does not automatically mean sequential. Multiple source items in one
 graph layer may be parallel events. The Task 1 manifest therefore requires an

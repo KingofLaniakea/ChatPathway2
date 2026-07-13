@@ -22,9 +22,12 @@ entry point at `downstream/tasks/task6_perturbed_cell/generation.py`; keep
 
 Do not treat external exploratory trees such as `PathwayDynamicsLLM` as runnable
 source for this repository. If a workflow is required for the current project,
-it must be migrated into `ChatPathway2` and recorded in `docs/CODE_PROVENANCE.md`.
+it must be migrated into `ChatPathway2` and recorded in
+`docs/agent/STATUS.md` and `docs/agent/ACTION_LOG.md`.
 
-All path references use the server's canonical layout:
-`/root/autodl-tmp/{models,data,checkpoints,runs}`. The merged Stage-3 model
+Historical script variants may still contain the former AutoDL layout
+`/root/autodl-tmp/{models,data,checkpoints,runs}`. Maintained experiments resolve
+assets through a runtime profile; CFFF uses
+`/cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui`. The merged Stage-3 model
 path `models/qwen3_8b_stage3_full_merged` is a build target of
 `c2s/prep/06_merge_stage3.py`, not an asset currently present on the server.

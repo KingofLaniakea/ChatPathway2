@@ -2,11 +2,12 @@
 """Task 1: conservative substep-level Conditional Step Prediction (CSP).
 
 An atomic substep is one directed relation such as ``A activates B``.  The
-preferred gold/prediction schema contains explicit ``remaining_substeps``.
-For the maintained ``remaining_steps`` dataset, a conservative adapter splits
-only sentence/semicolon-delimited clauses containing exactly one supported
-relation and non-empty left/right arguments.  Ambiguous clauses are rejected
-and counted; they are never silently converted into causal labels.
+preferred v3 gold/prediction schema is ``remaining_layers/events`` with
+canonical source/target IDs and a structured relation, so no sentence parser
+is used. Historical ``remaining_substeps`` and v2 ``remaining_steps`` remain
+readable; only the latter uses a conservative sentence/semicolon parser.
+Ambiguous clauses are rejected and counted, never silently converted into
+causal labels.
 
 Phenotype is outside this task.  A missing phenotype is neither a negative
 label nor an invalid CSP record.
@@ -106,6 +107,21 @@ RELATION_FORMS = {
     "mediates a functional link": "functional_link",
     "is shared in successive reactions with": "successive_reaction_link",
     "is shared in successive reactions": "successive_reaction_link",
+}
+STRUCTURED_RELATION_FORMS = {
+    "activation": "activate",
+    "inhibition": "inhibit",
+    "expression": "express",
+    "repression": "repress",
+    "phosphorylation": "phosphorylate",
+    "dephosphorylation": "dephosphorylate",
+    "glycosylation": "glycosylate",
+    "ubiquitination": "ubiquitinate",
+    "methylation": "methylate",
+    "binding/association": "associate",
+    "dissociation": "dissociate",
+    "indirect effect": "indirect_effect",
+    "state change": "state_change",
 }
 PARSER_VERSION = "atomic_relation_v2"
 RELATION_RE = re.compile(
@@ -241,8 +257,60 @@ def _load_json(value: Any) -> Any:
         return value
 
 
+def _v3_atomic_payload(loaded: dict[str, Any]) -> SubstepPayload:
+    parsed = parse_pathway_payload(loaded, allow_text_fallback=False)
+    if not parsed.schema_valid:
+        return SubstepPayload(
+            (),
+            False,
+            False,
+            0,
+            (),
+            (parsed.error or "pathway_continuation_v3 failed strict schema validation",),
+        )
+    output: list[AtomicSubstep] = []
+    raw_layers = loaded["remaining_layers"]
+    for layer in raw_layers:
+        step = int(layer["layer_index"])
+        for substep, event in enumerate(layer["events"]):
+            source = tuple(
+                sorted(
+                    _normalized_text(entity["canonical_id"])
+                    for entity in event["source"]
+                )
+            )
+            target = tuple(
+                sorted(
+                    _normalized_text(entity["canonical_id"])
+                    for entity in event["target"]
+                )
+            )
+            raw_relation = _normalized_text(event["relation"])
+            relation = STRUCTURED_RELATION_FORMS.get(raw_relation, raw_relation)
+            output.append(
+                AtomicSubstep(
+                    step=step,
+                    substep=substep,
+                    source=source,
+                    relation=relation,
+                    target=target,
+                    text=str(event["text"]).strip(),
+                )
+            )
+    return SubstepPayload(
+        tuple(output),
+        True,
+        True,
+        len(output),
+        (),
+        (),
+    )
+
+
 def parse_substeps(value: Any) -> SubstepPayload:
     loaded = _load_json(value)
+    if isinstance(loaded, dict) and "remaining_layers" in loaded:
+        return _v3_atomic_payload(loaded)
     if isinstance(loaded, dict) and "remaining_substeps" in loaded:
         try:
             raw = require_sequence(loaded["remaining_substeps"], "remaining_substeps")
@@ -261,9 +329,8 @@ def parse_substeps(value: Any) -> SubstepPayload:
     unparsed: list[str] = []
     total = 0
     for step_position, step_value in enumerate(parsed_pathway.steps):
-        # The maintained layer_set_v1 payload preserves source-item boundaries.
-        # They are authoritative even when adjacent items lack punctuation.
-        # Sentence splitting is only a legacy fallback for aggregate ``text``.
+        # Historical layer_set_v1 preserves serialized source-item boundaries.
+        # Sentence splitting is only a v2 fallback for aggregate ``text``.
         clauses = (
             list(step_value.substeps)
             if step_value.substeps

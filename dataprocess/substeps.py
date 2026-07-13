@@ -2,9 +2,11 @@
 
 Processed ChatPathway layers may contain several graph-grounded event strings
 joined into one ``text`` field.  This module recovers sentence-level events
-without requiring a general-purpose NLP sentence tokenizer.  When the original
-``source_items`` are available they are authoritative boundaries and their
-indices are retained as provenance.
+without requiring a general-purpose NLP sentence tokenizer.  When
+``source_items`` are available, their indices and paragraph boundaries are
+retained as serialization provenance.  They are not assumed to be canonical
+biological event boundaries unless the upstream producer explicitly provides
+that stronger contract.
 
 The splitter is deliberately conservative: it handles the punctuation used by
 the generated KEGG text while protecting decimals, dotted identifiers, common
@@ -176,9 +178,10 @@ def parse_substeps(
     Args:
         text: Aggregate layer text.  It is used when ``source_items`` is absent
             or contains no non-empty entries.
-        source_items: Original event strings from the processed JSON layer.
-            Non-empty items are authoritative boundaries and their original
-            zero-based indices are retained.  Repeated items are not removed.
+        source_items: Strings from the processed JSON layer. Non-empty item
+            boundaries and their original zero-based indices are retained.
+            Repeated items are not removed. The current NRC producer may place
+            a whole concatenated layer paragraph in one item.
 
     Returns:
         An immutable tuple of :class:`PathwaySubstep` records.

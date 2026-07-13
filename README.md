@@ -13,7 +13,7 @@ Qwen3-8B
   -> compute-matched stage-2 SFT-only control
      OR stage-2 SFT + HNN
      OR stage-2 SFT + (J-rI) grad H + F(t)
-  -> direct greedy JSON generation
+  -> direct greedy JSON generation with strict three-attempt repair
 ```
 
 HNN time advances once per ordered graph layer. Atomic `A relation B` spans in
@@ -23,10 +23,13 @@ not an active experiment.
 
 Start with:
 
-- [docs/WORKFLOW.md](docs/WORKFLOW.md) for the exact CFFF preparation, smoke,
-  train, inference, and evaluation order;
-- [docs/HAMILTONIAN_EXPERIMENTS.md](docs/HAMILTONIAN_EXPERIMENTS.md) for the
-  equations and scientific boundaries;
+- [docs/项目SPEC.md](docs/项目SPEC.md) for the project spirit and the complete
+  KEGG-to-dataset-to-model-to-downstream pipeline;
+- [docs/实验规划.md](docs/实验规划.md) for the concise A/B/C/D experiment design;
+- [docs/实验矩阵.xlsx](docs/实验矩阵.xlsx) for the filterable recommended
+  experiment combinations;
+- [docs/FROZEN_TASK_SPEC_2026-07-13.md](docs/FROZEN_TASK_SPEC_2026-07-13.md)
+  for the frozen Task 0-6 definitions;
 - [experiments/README.md](experiments/README.md) for the five executable matrix
   rows and three-seed artifact layout;
 - [dataprocess/README.md](dataprocess/README.md) for schema, identity, split,
@@ -34,9 +37,9 @@ Start with:
 - [downstream/new_tasks/README.md](downstream/new_tasks/README.md) for the
   revised Task 0-6 contracts.
 
-PHNN remains deferred until an independently observed port/control variable is
-defined. Neural ODE and semantic-boundary guided inference are not in the first
-Hamiltonian benchmark.
+The active dataset target is the audited `pathway_continuation_v3` release built
+directly from `processed_graph`. PHNN remains deferred until an independently
+observed port/control variable is defined.
 
 Never commit credentials, environment files, model weights, generated CSVs,
 checkpoints, runs, or downstream artifacts.

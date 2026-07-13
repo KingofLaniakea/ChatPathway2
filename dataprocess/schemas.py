@@ -230,5 +230,5 @@ class PathwayExample:
             "target_step_count": len(self.remaining_steps),
             "has_empty_prefix": int(self.prefix_len == 0),
             "substep_schema_version": "layer_set_v1",
-            "substep_source": "processed_source_items",
+            "substep_source": "processed_layer_items+sentence_parser_v1",
         }

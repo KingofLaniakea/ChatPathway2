@@ -11,10 +11,11 @@ the first result can be attributed.
 | `exp001_hnn_reconae_joint_direct` | stage-2 SFT plus `J grad H` |
 | `exp002_forced_damped_hnn_reconae_joint_direct` | primary stage-2 SFT plus `(J-rI) grad H + F(t)` |
 
-The default core evaluation is disjoint from training by both held-out organism
-and canonical five-digit KEGG pathway family. The separate
-`test_kegg_pathway_organism_eval.csv` retains all seven held-out organisms and
-allows reported family overlap for cross-species-transfer analysis.
+The active release is `data/pathway_v3_cap256/`. Its test set is disjoint from
+training by both held-out organism and canonical five-digit KEGG pathway
+family; validation holds out separate complete families. The scheduler refuses
+to start unless the generated read-only `data_audit.json` has passed and still
+matches all three CSV hashes.
 
 All mutable artifacts are seed-scoped:
 
@@ -29,41 +30,61 @@ shared SFT and AE. Recommended seeds are `20260711`, `20260712`, and
 `20260713`.
 
 The controlled matrix pins `max_length=8192` and per-process training
-`batch_size=1` for SFT, AE, and every stage-2 arm. On the prepared CFFF
-record-balanced 0.1% first-round training set,
-this retains 99.17% of graph-layer targets and 91.07% of substeps; 31 of 17,416
-rows have no complete semantic layer inside the text budget and therefore
-contribute CE but no dynamics loss. Truncation counters remain mandatory
-reported metrics.
+`batch_size=1` for SFT, AE, and every stage-2 arm. Dataset materialization uses
+the real tokenizer and excludes any row whose complete prompt plus closed JSON
+answer exceeds that budget. Trainers fail if an oversized row slips through;
+they never truncate an assistant JSON target.
 
-Direct inference pins per-process `batch_size=1` and
-`max_new_tokens=1024`. Batch size is an experimental control: an audited
-batch-8 attempt changed 6 of the first 40 greedy token trajectories relative
-to batch 1, even when some changes were only same-layer substep permutations.
-Four-GPU speedup therefore comes only from disjoint data shards. On the 764-row
-strict core evaluation, the longest gold answer is 925 tokens (99th percentile
-678), so the cap covers every gold target while bounding non-terminating repetition.
+The materialized rows are eligible prefix views, not the per-epoch training count.
+Controlled training uses one deterministic prefix per biological record per
+epoch. Across epochs,
+each record rotates through short-, middle-, and long-continuation views. SFT
+weights short continuation twice per four-record-epochs; HNN/FDHNN weights long
+continuation twice so trajectory losses still see multi-step targets. Validation
+uses one seed-fixed prefix per record with a balanced short/middle/long policy
+and never rotates across epochs. This prevents long pathways from receiving
+k-fold weight in either optimization or checkpoint selection and cuts per-epoch
+examples without permanently dropping a record.
+
+Direct inference pins per-process `batch_size=1`. The first greedy attempt uses
+up to 4096 new tokens. Invalid or unclosed JSON is regenerated with an explicit
+repair turn and a larger budget; the third and final attempt may use 8192. If
+that output still fails strict schema validation, inference records the failed
+history and exits with an error. Four-GPU speedup comes only from disjoint data shards.
 Every completed sample is immediately appended to a progress JSONL with its
 identity, gold answer, prediction, finish reason, and JSON/schema validity. A
 direct one-GPU wrapper writes `direct.progress.jsonl`. The CFFF scheduler writes
 four `direct.progress.shard-*-of-*.jsonl` files live, then verifies and merges
 them into `direct.progress.jsonl` and the final CSV in original dataset order.
 
-Checkpoint selection uses a deterministic `pathway_family_id` validation split,
-not a row or source-only split. For seeds `20260711/12/13`, validation contains
-16/18/17 entire families respectively and has zero family overlap with that
-seed's optimization rows. SFT, AE, and all stage-2 arms reuse the same split.
+Checkpoint selection uses one dataset-revision-fixed `pathway_family_id`
+validation split, not a row or source-only split. The dataset build seed fixes
+that family set once; training seeds `20260711/12/13` change model RNG and
+artifact paths, not the data split. SFT, AE, and all stage-2 arms reuse the
+same validation CSV, whose actual family count and zero-overlap result come
+from `data_audit.json`.
 
 ## CFFF preparation
 
 ```bash
 export CHATPATHWAY_PROFILE=cfff
-python -m experiments.run_experiment prepare-data --overwrite
+python -m experiments.run_experiment prepare-structured-data \
+  --max-records-per-family 256 \
+  --minimum-train-records 12000 \
+  --seed 20260711 \
+  --overwrite
 python -m experiments.run_experiment download-model
 python -m experiments.run_experiment check-assets \
   --phase train --ids base000_shared_sft_reconae --profile cfff \
   --create-output-dirs --strict
 ```
+
+The builder reconstructs event sets directly from `processed_graph`, selects a
+family-capped diverse release, writes record JSONL plus compatibility CSVs,
+and creates `dataset_manifest.json` and read-only `data_audit.json`. The default
+minimum of 12,000 train records prevents silently releasing another short
+training run. The audit records the actual record/token distribution and a
+rough runtime estimate; the first measured v3 SFT run replaces that estimate.
 
 ## One-seed run
 
@@ -83,10 +104,12 @@ python -m experiments.run_experiment infer exp002_forced_damped_hnn_reconae_join
 
 ## Four-A100 CFFF schedule
 
-The shared SFT is a four-process DDP job. AE and each stage-2 arm are
-single-GPU jobs. Direct inference uses four independent model replicas on
-mutually exclusive strided input shards; this is data-parallel evaluation, not
-model parallelism. Run the dependency-aware scheduler:
+The shared SFT is a four-process DDP job. The primary forced/damped HNN stage
+uses four processes; pure HNN and the stage-2 SFT control use two processes
+each and run concurrently. AE uses one GPU while dependency-ready inference
+shards can occupy the others. Direct inference uses four independent model
+replicas on mutually exclusive strided input shards; this is data-parallel
+evaluation, not model parallelism. Run the dependency-aware scheduler:
 
 ```bash
 python -m experiments.run_cfff_matrix \
@@ -104,9 +127,9 @@ python -m experiments.run_cfff_matrix \
   --only-baseline-inference
 ```
 
-It runs the three SFT prerequisites sequentially with all four GPUs, then fills
-the GPUs with independent AE, stage-2 control/HNN/forced-damped jobs and
-inference shards as their dependencies become available. The merge rejects a
+Across three seeds it runs each shared SFT with all four GPUs, then fills the
+node with AE, the four-GPU primary stage, the concurrent two-plus-two control
+stages, and inference shards as their dependencies become available. The merge rejects a
 missing or duplicate dataset index, changed source field, mismatched shard run
 configuration, or progress hash before creating canonical outputs. Completed
 outputs are skipped on restart only when the trainer's atomic

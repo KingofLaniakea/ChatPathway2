@@ -27,7 +27,8 @@ if __name__ == "__main__":
             "--base-model", asset_path("models/qwen3_8B"),
             "--sft-lora", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best"),
             "--ae-ckpt", seeded_asset_path("checkpoints/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"),
-            "--train", asset_path("data/train_kegg_pathway_record_balanced_0p1pct.csv"),
+            "--train", asset_path("data/pathway_v3_cap256/train_pathway_continuation_v3_cap256.csv"),
+            "--validation", asset_path("data/pathway_v3_cap256/validation_pathway_continuation_v3.csv"),
             "--save-dir", seeded_asset_path("checkpoints/experiments/exp003_stage2_sft_only_direct/final_lora"),
         ],
     )

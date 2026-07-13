@@ -58,6 +58,7 @@ def audit_rows(
             answer,
             max_length=max_length,
             answer_budget_fraction=answer_budget_fraction,
+            truncation_policy="measure",
         )
         counters["rows"] += 1
         counters["rows_prompt_truncated"] += int(encoded.prompt_tokens_dropped > 0)

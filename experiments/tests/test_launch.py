@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from experiments._launch import (
     controlled_inference_budget_args,
+    controlled_training_budget_args,
     experiment_seed,
     seeded_asset_path,
     step_commands,
@@ -15,11 +16,20 @@ from experiments.check_runtime_assets import rewrite_asset_path
 
 
 class LaunchTests(unittest.TestCase):
-    def test_controlled_inference_budget_covers_core_gold_without_runaway_generation(self) -> None:
+    def test_controlled_training_uses_one_prefix_per_record_per_epoch(self) -> None:
+        args = controlled_training_budget_args()
+        self.assertEqual(
+            args[args.index("--prefix-sampling") + 1],
+            "one_per_record",
+        )
+
+    def test_controlled_inference_budget_uses_three_strict_json_attempts(self) -> None:
         args = controlled_inference_budget_args()
         self.assertEqual(args[args.index("--batch-size") + 1], "1")
         self.assertEqual(args[args.index("--max-length") + 1], "8192")
-        self.assertEqual(args[args.index("--max-new-tokens") + 1], "1024")
+        self.assertEqual(args[args.index("--max-new-tokens") + 1], "4096")
+        self.assertEqual(args[args.index("--max-json-attempts") + 1], "3")
+        self.assertEqual(args[args.index("--retry-max-new-tokens") + 1], "8192")
 
     def test_run_steps_passthrough_is_appended_to_every_stage(self) -> None:
         commands = step_commands(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from downstream.new_tasks.task1_substep_csp import parse_atomic_clause
+from downstream.new_tasks.task1_substep_csp import parse_atomic_clause, parse_substeps
 
 
 class Task1SubstepParserTests(unittest.TestCase):
@@ -65,6 +65,31 @@ class Task1SubstepParserTests(unittest.TestCase):
             relation="indirect_link",
             target=("stress-activated protein kinase jnk",),
         )
+
+    def test_v3_uses_canonical_event_fields_without_sentence_parsing(self) -> None:
+        parsed = parse_substeps(
+            {
+                "schema_version": "pathway_continuation_v3",
+                "remaining_layers": [
+                    {
+                        "layer_index": 4,
+                        "events": [
+                            {
+                                "source": [{"canonical_id": "hsa:1", "name": "A"}],
+                                "relation": "activation",
+                                "target": [{"canonical_id": "hsa:2", "name": "B"}],
+                                "text": "This wording does not need a relation parser.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertTrue(parsed.strict_schema_valid)
+        self.assertTrue(parsed.parser_valid)
+        self.assertEqual(parsed.substeps[0].source, ("hsa:1",))
+        self.assertEqual(parsed.substeps[0].relation, "activate")
+        self.assertEqual(parsed.substeps[0].target, ("hsa:2",))
 
 
 if __name__ == "__main__":

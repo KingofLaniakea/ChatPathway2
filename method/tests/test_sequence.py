@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 import unittest
 
-from method.training.sequence import encode_supervised, pathway_step_substep_texts, trim_prompt_ids
+from method.training.sequence import (
+    IncompleteSupervisionError,
+    encode_supervised,
+    pathway_step_substep_texts,
+    trim_prompt_ids,
+)
 
 
 class CharacterTokenizer:
@@ -91,6 +96,7 @@ class SequenceEncodingTests(unittest.TestCase):
             answer,
             max_length=second_start,
             answer_budget_fraction=0.9,
+            truncation_policy="measure",
         )
         self.assertEqual(truncated.semantic_steps_total, 2)
         self.assertEqual(truncated.semantic_steps_retained, 1)
@@ -115,6 +121,40 @@ class SequenceEncodingTests(unittest.TestCase):
         self.assertEqual(
             pathway_step_substep_texts(answer),
             (("A activates B.", "C inhibits D."),),
+        )
+
+    def test_training_fails_instead_of_truncating_json(self) -> None:
+        answer = self.answer()
+        with self.assertRaises(IncompleteSupervisionError):
+            encode_supervised(
+                self.tokenizer,
+                "P",
+                answer,
+                max_length=32,
+            )
+
+    def test_v3_event_texts_remain_grouped_by_layer(self) -> None:
+        answer = json.dumps(
+            {
+                "schema_version": "pathway_continuation_v3",
+                "remaining_layers": [
+                    {
+                        "layer_index": 1,
+                        "events": [
+                            {"text": "A activates B."},
+                            {"text": "C inhibits D."},
+                        ],
+                    },
+                    {
+                        "layer_index": 2,
+                        "events": [{"text": "B produces E."}],
+                    },
+                ],
+            }
+        )
+        self.assertEqual(
+            pathway_step_substep_texts(answer),
+            (("A activates B.", "C inhibits D."), ("B produces E.",)),
         )
 
 

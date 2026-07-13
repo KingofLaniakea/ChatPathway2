@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import platform
+import time
 from contextlib import nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -68,6 +69,8 @@ COUNTER_KEYS = (
     "text_truncated_semantic_steps",
     "prompt_tokens_dropped",
     "answer_tokens_dropped",
+    "input_tokens",
+    "supervised_tokens",
 )
 
 
@@ -344,7 +347,10 @@ def evaluate_distributed(
         for key in LOSS_KEYS:
             sums[key] += float(losses[key].detach().item()) * batch_examples  # type: ignore[union-attr]
         for key in COUNTER_KEYS:
-            counters[key] += int(losses[key])
+            if key in losses:
+                counters[key] += int(losses[key])
+        counters["input_tokens"] += int(batch["attention_mask"].sum().item())
+        counters["supervised_tokens"] += int((batch["labels"] != -100).sum().item())
         examples += batch_examples
     return _reduce_metrics(sums, counters, examples, device=device, distributed=distributed)
 
@@ -387,8 +393,32 @@ def train(cfg: TrainConfig | None = None) -> None:
                     if cfg.validation_path
                     else "deterministic_group_split"
                 ),
-                "train_rows": len(train_frame),
-                "validation_rows": len(validation_frame),
+                "train_eligible_prefix_rows": len(train_frame),
+                "train_records": (
+                    int(train_frame["record_id"].nunique())
+                    if "record_id" in train_frame.columns
+                    else len(train_frame)
+                ),
+                "train_samples_per_epoch": (
+                    int(train_frame["record_id"].nunique())
+                    if getattr(cfg, "prefix_sampling", "all_rows") == "one_per_record"
+                    and "record_id" in train_frame.columns
+                    else len(train_frame)
+                ),
+                "validation_prefix_rows": len(validation_frame),
+                "validation_records": (
+                    int(validation_frame["record_id"].nunique())
+                    if "record_id" in validation_frame.columns
+                    else len(validation_frame)
+                ),
+                "validation_samples": (
+                    int(validation_frame["record_id"].nunique())
+                    if "record_id" in validation_frame.columns
+                    else len(validation_frame)
+                ),
+                "prefix_sampling": getattr(cfg, "prefix_sampling", "all_rows"),
+                "prefix_policy": getattr(cfg, "prefix_policy", "dynamics_cycle"),
+                "validation_prefix_policy": "balanced_cycle",
                 "seed": cfg.seed,
                 "validation_group_column": cfg.validation_group_column,
                 "base_model_identity": base_model_identity(cfg.base_model),
@@ -431,12 +461,17 @@ def train(cfg: TrainConfig | None = None) -> None:
                     manifest["validation_sha256"] = file_sha256(cfg.validation_path)
             write_json(save_root / "run_manifest.json", manifest)
             logger.info(
-                "variant=%s structure=%s train_rows=%d validation_rows=%d world_size=%d "
-                "effective_global_batch_size=%d",
+                "variant=%s structure=%s train_eligible_prefix_rows=%d train_records=%d "
+                "train_samples_per_epoch=%d validation_prefix_rows=%d validation_records=%d "
+                "validation_samples=%d world_size=%d effective_global_batch_size=%d",
                 cfg.variant,
                 cfg.structure_mode,
-                len(train_frame),
-                len(validation_frame),
+                manifest["train_eligible_prefix_rows"],
+                manifest["train_records"],
+                manifest["train_samples_per_epoch"],
+                manifest["validation_prefix_rows"],
+                manifest["validation_records"],
+                manifest["validation_samples"],
                 world_size,
                 effective_global_batch_size(cfg, world_size),
             )
@@ -483,6 +518,10 @@ def train(cfg: TrainConfig | None = None) -> None:
             damping_mode=cfg.damping_mode,
         ).to(device).float()
         _broadcast_module(dynamics, distributed=distributed)
+        # Variant-specific modules consume different amounts of random state.
+        # Reset after construction so matched HNN/FDHNN/SFT-control arms use
+        # the same per-rank LoRA-dropout streams and sampler seeds.
+        seed_everything(cfg.seed + rank, deterministic=cfg.deterministic)
         if distributed:
             model = DDP(
                 model,
@@ -504,6 +543,29 @@ def train(cfg: TrainConfig | None = None) -> None:
 
         train_dataset = _dataset(train_frame, tokenizer, cfg, training=True)
         validation_dataset = _dataset(validation_frame, tokenizer, cfg, training=False)
+        if is_main:
+            selection_summary = getattr(validation_dataset, "selection_summary", None)
+            manifest["validation_prefix_selection"] = (
+                selection_summary()
+                if callable(selection_summary)
+                else {"all": len(validation_dataset)}
+            )
+            manifest["train_samples_per_epoch"] = len(train_dataset)
+            manifest["validation_samples"] = len(validation_dataset)
+            manifest["distributed"]["train_sampler_padding_rows_per_epoch"] = (
+                math.ceil(
+                    len(train_dataset) / effective_global_batch_size(cfg, world_size)
+                )
+                * effective_global_batch_size(cfg, world_size)
+                - len(train_dataset)
+                if distributed
+                else 0
+            )
+            write_json(save_root / "run_manifest.json", manifest)
+            logger.info(
+                "validation_prefix_selection=%s",
+                json.dumps(manifest["validation_prefix_selection"], sort_keys=True),
+            )
         train_sampler = (
             MatchedGlobalBatchTrainSampler(
                 train_dataset,
@@ -549,8 +611,22 @@ def train(cfg: TrainConfig | None = None) -> None:
             _set_dataset_epoch(train_dataset, epoch)
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
+            selection_summary = getattr(train_dataset, "selection_summary", None)
+            prefix_selection = (
+                selection_summary()
+                if callable(selection_summary)
+                else {"all": len(train_dataset)}
+            )
+            if is_main:
+                logger.info(
+                    "epoch=%d train_samples=%d prefix_selection=%s",
+                    epoch,
+                    len(train_dataset),
+                    json.dumps(prefix_selection, sort_keys=True),
+                )
             model.train()
             dynamics.train()
+            train_started = time.perf_counter()
             sums = {key: 0.0 for key in LOSS_KEYS}
             counters = {key: 0 for key in COUNTER_KEYS}
             examples = 0
@@ -591,7 +667,10 @@ def train(cfg: TrainConfig | None = None) -> None:
                 for key in LOSS_KEYS:
                     sums[key] += float(losses[key].detach().item()) * batch_examples  # type: ignore[union-attr]
                 for key in COUNTER_KEYS:
-                    counters[key] += int(losses[key])
+                    if key in losses:
+                        counters[key] += int(losses[key])
+                counters["input_tokens"] += int(batch["attention_mask"].sum().item())
+                counters["supervised_tokens"] += int((batch["labels"] != -100).sum().item())
                 examples += batch_examples
 
                 if group_end:
@@ -627,6 +706,22 @@ def train(cfg: TrainConfig | None = None) -> None:
                 device=device,
                 distributed=distributed,
             )
+            train_seconds_value = torch.tensor(
+                time.perf_counter() - train_started,
+                dtype=torch.float64,
+                device=device,
+            )
+            if distributed:
+                dist.all_reduce(train_seconds_value, op=dist.ReduceOp.MAX)
+            train_seconds = float(train_seconds_value.item())
+            train_metrics["seconds"] = train_seconds
+            train_metrics["input_tokens_per_second"] = float(train_metrics["input_tokens"]) / max(
+                train_seconds, 1e-9
+            )
+            train_metrics["supervised_tokens_per_second"] = float(
+                train_metrics["supervised_tokens"]
+            ) / max(train_seconds, 1e-9)
+            validation_started = time.perf_counter()
             validation_metrics = evaluate_distributed(
                 model=unwrap_ddp(model),
                 projection=projection,
@@ -637,8 +732,17 @@ def train(cfg: TrainConfig | None = None) -> None:
                 time_grid=time_grid,
                 distributed=distributed,
             )
+            validation_seconds_value = torch.tensor(
+                time.perf_counter() - validation_started,
+                dtype=torch.float64,
+                device=device,
+            )
+            if distributed:
+                dist.all_reduce(validation_seconds_value, op=dist.ReduceOp.MAX)
+            validation_metrics["seconds"] = float(validation_seconds_value.item())
             record = {
                 "epoch": epoch,
+                "prefix_selection": prefix_selection,
                 "train": train_metrics,
                 "validation": validation_metrics,
                 "learning_rate": optimizer.param_groups[0]["lr"],
@@ -657,7 +761,8 @@ def train(cfg: TrainConfig | None = None) -> None:
                 write_json(save_root / "history.json", history)
                 logger.info(
                     "epoch=%d train_total=%.6f val_total=%.6f val_sft=%.6f "
-                    "val_velocity=%.6f val_state=%.6f world_size=%d",
+                    "val_velocity=%.6f val_state=%.6f world_size=%d train_seconds=%.1f "
+                    "validation_seconds=%.1f supervised_tokens_per_second=%.1f",
                     epoch,
                     train_metrics["total"],
                     validation_metrics["total"],
@@ -665,6 +770,9 @@ def train(cfg: TrainConfig | None = None) -> None:
                     validation_metrics["align"],
                     validation_metrics["state"],
                     world_size,
+                    train_metrics["seconds"],
+                    validation_metrics["seconds"],
+                    train_metrics["supervised_tokens_per_second"],
                 )
                 raw_model = unwrap_ddp(model)
                 save_checkpoint(

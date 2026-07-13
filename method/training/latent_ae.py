@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import csv
+import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,12 @@ from method.training.common import (
     write_json,
 )
 from method.training.sequence import encode_supervised
+from method.training.csv_io import read_training_csv
+from method.training.prefix_sampling import (
+    EpochPrefixView,
+    PREFIX_POLICIES,
+    PREFIX_SAMPLING_MODES,
+)
 
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
@@ -54,6 +61,8 @@ class AEConfig:
     epochs: int
     max_length: int
     answer_budget_fraction: float
+    prefix_sampling: str
+    prefix_policy: str
     latent_dim: int
     cosine_weight: float
     validation_fraction: float
@@ -80,6 +89,16 @@ def parse_args() -> AEConfig:
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--max-length", type=int, default=1072)
     parser.add_argument("--answer-budget-fraction", type=float, default=0.5)
+    parser.add_argument(
+        "--prefix-sampling",
+        choices=PREFIX_SAMPLING_MODES,
+        default="all_rows",
+    )
+    parser.add_argument(
+        "--prefix-policy",
+        choices=tuple(PREFIX_POLICIES),
+        default="balanced_cycle",
+    )
     parser.add_argument("--latent-dim", type=int, default=128)
     parser.add_argument("--cosine-weight", type=float, default=2.0)
     parser.add_argument("--validation-fraction", type=float, default=0.05)
@@ -129,17 +148,31 @@ class AEDataset(Dataset):
         tokenizer: Any,
         max_length: int,
         answer_budget_fraction: float,
+        prefix_sampling: str,
+        prefix_policy: str,
+        seed: int,
     ):
-        self.records = frame.to_dict(orient="records")
+        self.prefix_view = EpochPrefixView(
+            frame.to_dict(orient="records"),
+            sampling_mode=prefix_sampling,
+            policy=prefix_policy,
+            seed=seed,
+        )
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.answer_budget_fraction = answer_budget_fraction
 
     def __len__(self) -> int:
-        return len(self.records)
+        return len(self.prefix_view)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.prefix_view.set_epoch(epoch)
+
+    def selection_summary(self) -> dict[str, int]:
+        return self.prefix_view.selection_summary()
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        row = self.records[index]
+        row = self.prefix_view.row(index)
         question = str(row.get("question", ""))
         answer = str(row.get("answer", row.get("formatted_answer_no_phenotype", "")))
         prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
@@ -189,15 +222,15 @@ def make_collate_fn(pad_id: int):
 
 
 def load_frames(cfg: AEConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
-    frame = pd.read_csv(cfg.train_path, engine="c", quoting=csv.QUOTE_MINIMAL, on_bad_lines="error")
+    frame = read_training_csv(cfg.train_path)
     if cfg.limit is not None:
         frame = frame.head(cfg.limit)
     if frame.empty:
         raise ValueError("AE training CSV contains no rows")
+    if cfg.prefix_sampling == "one_per_record" and "record_id" not in frame.columns:
+        raise ValueError("one_per_record prefix sampling requires record_id")
     if cfg.validation_path:
-        validation = pd.read_csv(
-            cfg.validation_path, engine="c", quoting=csv.QUOTE_MINIMAL, on_bad_lines="error"
-        )
+        validation = read_training_csv(cfg.validation_path)
         if validation.empty:
             raise ValueError("explicit AE validation CSV contains no rows")
         ensure_disjoint_groups(
@@ -292,8 +325,36 @@ def train() -> None:
         "git_commit": git_commit(Path(__file__).resolve().parents[2]),
         "train_path": str(Path(cfg.train_path).resolve()),
         "validation_path": str(Path(cfg.validation_path).resolve()) if cfg.validation_path else "deterministic_group_split",
-        "train_rows": len(train_frame),
-        "validation_rows": len(validation_frame),
+        "train_eligible_prefix_rows": len(train_frame),
+        "train_records": (
+            int(train_frame["record_id"].nunique())
+            if "record_id" in train_frame.columns
+            else len(train_frame)
+        ),
+        "train_samples_per_epoch": (
+            int(train_frame["record_id"].nunique())
+            if cfg.prefix_sampling == "one_per_record"
+            else len(train_frame)
+        ),
+        "validation_prefix_rows": len(validation_frame),
+        "validation_records": (
+            int(validation_frame["record_id"].nunique())
+            if "record_id" in validation_frame.columns
+            else len(validation_frame)
+        ),
+        "validation_samples": (
+            int(validation_frame["record_id"].nunique())
+            if "record_id" in validation_frame.columns
+            else len(validation_frame)
+        ),
+        "validation_prefix_sampling": (
+            "one_per_record"
+            if "record_id" in validation_frame.columns
+            else "all_rows"
+        ),
+        "validation_prefix_policy": "balanced_cycle",
+        "prefix_sampling": cfg.prefix_sampling,
+        "prefix_policy": cfg.prefix_policy,
         "seed": cfg.seed,
         "base_model_identity": base_model_identity(cfg.base_model),
         "sft_adapter_sha256": artifact_sha256(cfg.sft_lora),
@@ -303,7 +364,17 @@ def train() -> None:
         if cfg.validation_path:
             manifest["validation_sha256"] = file_sha256(cfg.validation_path)
     write_json(save_root / "run_manifest.json", manifest)
-    logger.info("train_rows=%d validation_rows=%d seed=%d", len(train_frame), len(validation_frame), cfg.seed)
+    logger.info(
+        "train_eligible_prefix_rows=%d train_records=%d train_samples_per_epoch=%d "
+        "validation_prefix_rows=%d validation_records=%d validation_samples=%d seed=%d",
+        manifest["train_eligible_prefix_rows"],
+        manifest["train_records"],
+        manifest["train_samples_per_epoch"],
+        manifest["validation_prefix_rows"],
+        manifest["validation_records"],
+        manifest["validation_samples"],
+        cfg.seed,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -323,15 +394,39 @@ def train() -> None:
     ).to(cfg.device).float()
     optimizer = optim.AdamW(projection.parameters(), lr=cfg.lr)
     collate = make_collate_fn(tokenizer.pad_token_id)
+    train_dataset = AEDataset(
+        train_frame,
+        tokenizer,
+        cfg.max_length,
+        cfg.answer_budget_fraction,
+        cfg.prefix_sampling,
+        cfg.prefix_policy,
+        cfg.seed,
+    )
+    validation_dataset = AEDataset(
+        validation_frame,
+        tokenizer,
+        cfg.max_length,
+        cfg.answer_budget_fraction,
+        "one_per_record" if "record_id" in validation_frame.columns else "all_rows",
+        "balanced_cycle",
+        cfg.seed,
+    )
+    manifest["validation_prefix_selection"] = validation_dataset.selection_summary()
+    write_json(save_root / "run_manifest.json", manifest)
+    logger.info(
+        "validation_prefix_selection=%s",
+        json.dumps(manifest["validation_prefix_selection"], sort_keys=True),
+    )
     train_loader = DataLoader(
-        AEDataset(train_frame, tokenizer, cfg.max_length, cfg.answer_budget_fraction),
+        train_dataset,
         batch_size=cfg.batch_size,
         shuffle=True,
         generator=torch.Generator().manual_seed(cfg.seed),
         collate_fn=collate,
     )
     validation_loader = DataLoader(
-        AEDataset(validation_frame, tokenizer, cfg.max_length, cfg.answer_budget_fraction),
+        validation_dataset,
         batch_size=cfg.batch_size,
         shuffle=False,
         collate_fn=collate,
@@ -342,12 +437,24 @@ def train() -> None:
     optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, cfg.epochs + 1):
+        train_dataset.set_epoch(epoch)
+        prefix_selection = train_dataset.selection_summary()
+        logger.info(
+            "epoch=%d train_samples=%d prefix_selection=%s",
+            epoch,
+            len(train_dataset),
+            prefix_selection,
+        )
         projection.train()
+        train_started = time.perf_counter()
         sums = {"total": 0.0, "mse": 0.0, "cosine": 0.0}
         steps = 0
         prompt_dropped = answer_dropped = 0
+        input_tokens = reconstruction_tokens = 0
         progress = tqdm(train_loader, desc=f"AE epoch {epoch}")
         for step, batch in enumerate(progress):
+            input_tokens += int(batch["attention_mask"].sum().item())
+            reconstruction_tokens += int(batch["loss_mask"].sum().item())
             losses = reconstruction_losses(
                 backbone=backbone,
                 projection=projection,
@@ -374,19 +481,39 @@ def train() -> None:
             **{key: value / max(steps, 1) for key, value in sums.items()},
             "prompt_tokens_dropped": prompt_dropped,
             "answer_tokens_dropped": answer_dropped,
+            "input_tokens": input_tokens,
+            "reconstruction_tokens": reconstruction_tokens,
+            "seconds": time.perf_counter() - train_started,
         }
+        train_metrics["input_tokens_per_second"] = input_tokens / max(
+            float(train_metrics["seconds"]), 1e-9
+        )
+        train_metrics["reconstruction_tokens_per_second"] = reconstruction_tokens / max(
+            float(train_metrics["seconds"]), 1e-9
+        )
+        validation_started = time.perf_counter()
         validation_metrics = evaluate(backbone, projection, validation_loader, cfg)
-        record = {"epoch": epoch, "train": train_metrics, "validation": validation_metrics, "lr": cfg.lr}
+        validation_metrics["seconds"] = time.perf_counter() - validation_started
+        record = {
+            "epoch": epoch,
+            "prefix_selection": prefix_selection,
+            "train": train_metrics,
+            "validation": validation_metrics,
+            "lr": cfg.lr,
+        }
         history.append(record)
         append_jsonl(save_root / "metrics.jsonl", record)
         write_json(save_root / "history.json", history)
         logger.info(
-            "epoch=%d train_total=%.6f val_total=%.6f val_mse=%.6f val_cosine=%.6f",
+            "epoch=%d train_total=%.6f val_total=%.6f val_mse=%.6f val_cosine=%.6f train_seconds=%.1f validation_seconds=%.1f reconstruction_tokens_per_second=%.1f",
             epoch,
             train_metrics["total"],
             validation_metrics["total"],
             validation_metrics["mse"],
             validation_metrics["cosine"],
+            train_metrics["seconds"],
+            validation_metrics["seconds"],
+            train_metrics["reconstruction_tokens_per_second"],
         )
         save_checkpoint(save_root / f"checkpoint_epoch_{epoch}", projection, epoch, record)
         improved, should_stop = early_stopping.update(validation_metrics["total"], epoch)

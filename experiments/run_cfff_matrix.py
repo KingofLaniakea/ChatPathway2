@@ -14,6 +14,8 @@ duplicates, or provenance drift.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -32,6 +34,7 @@ STAGE2_IDS = (
     "exp001_hnn_reconae_joint_direct",
     "exp003_stage2_sft_only_direct",
 )
+DATASET_DIRECTORY = Path("data/pathway_v3_cap256")
 
 STAGE2_RESOURCES = {
     "exp002_forced_damped_hnn_reconae_joint_direct": 4,
@@ -194,8 +197,15 @@ def build_jobs(
 ) -> list[Job]:
     jobs: list[Job] = []
     model = root / "models/qwen3_8B"
-    train = root / "data/train_kegg_pathway_record_balanced_0p1pct.csv"
-    test = root / "data/test_kegg_pathway_eval.csv"
+    dataset_root = root / DATASET_DIRECTORY
+    train = dataset_root / "train_pathway_continuation_v3_cap256.csv"
+    validation = dataset_root / "validation_pathway_continuation_v3.csv"
+    test = dataset_root / "test_pathway_continuation_v3.csv"
+    record_files = {
+        "train": dataset_root / "train_pathway_records_v3.jsonl",
+        "validation": dataset_root / "validation_pathway_records_v3.jsonl",
+        "test": dataset_root / "test_pathway_records_v3.jsonl",
+    }
 
     for seed in seeds:
         seed_root = root / f"checkpoints/seeds/{seed}"
@@ -226,6 +236,8 @@ def build_jobs(
                     str(model),
                     "--train",
                     str(train),
+                    "--validation",
+                    str(validation),
                     "--save-dir",
                     str(sft_root),
                     "--seed",
@@ -255,6 +267,8 @@ def build_jobs(
                     str(sft_root / "checkpoint_best"),
                     "--train",
                     str(train),
+                    "--validation",
+                    str(validation),
                     "--save-dir",
                     str(ae_root),
                     "--seed",
@@ -361,15 +375,54 @@ def outputs_complete(job: Job) -> bool:
 
 
 def validate_inputs(root: Path) -> None:
+    dataset_root = root / DATASET_DIRECTORY
+    train = dataset_root / "train_pathway_continuation_v3_cap256.csv"
+    validation = dataset_root / "validation_pathway_continuation_v3.csv"
+    test = dataset_root / "test_pathway_continuation_v3.csv"
+    manifest = dataset_root / "dataset_manifest.json"
+    audit_path = dataset_root / "data_audit.json"
+    record_files = {
+        "train": dataset_root / "train_pathway_records_v3.jsonl",
+        "validation": dataset_root / "validation_pathway_records_v3.jsonl",
+        "test": dataset_root / "test_pathway_records_v3.jsonl",
+    }
     required = (
         root / "models/qwen3_8B/config.json",
         root / "models/qwen3_8B/chatpathway_download_manifest.json",
-        root / "data/train_kegg_pathway_record_balanced_0p1pct.csv",
-        root / "data/test_kegg_pathway_eval.csv",
+        train,
+        validation,
+        test,
+        manifest,
+        audit_path,
+        *record_files.values(),
     )
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise FileNotFoundError("missing CFFF matrix input(s):\n" + "\n".join(missing))
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    if audit.get("status") != "passed" or audit.get("strict_failures"):
+        raise ValueError(f"dataset release audit did not pass: {audit_path}")
+    if audit_path.stat().st_mode & 0o222:
+        raise PermissionError(f"generated data audit must be read-only: {audit_path}")
+
+    def sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while chunk := handle.read(8 * 1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    if sha256(manifest) != audit.get("manifest_sha256"):
+        raise ValueError("dataset manifest changed after data_audit.json was generated")
+    for split, path in (("train", train), ("validation", validation), ("test", test)):
+        expected = audit.get("splits", {}).get(split, {}).get("sha256")
+        if not expected or sha256(path) != expected:
+            raise ValueError(f"{split} CSV changed after data_audit.json was generated")
+        record_expected = (
+            audit.get("splits", {}).get(split, {}).get("record_jsonl", {}).get("sha256")
+        )
+        if not record_expected or sha256(record_files[split]) != record_expected:
+            raise ValueError(f"{split} record JSONL changed after data_audit.json was generated")
 
 
 def run_scheduler(

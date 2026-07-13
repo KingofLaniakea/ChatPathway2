@@ -305,6 +305,33 @@ def main() -> None:
     prepare_data.add_argument("--seed", type=int, default=20260711)
     prepare_data.add_argument("--overwrite", action="store_true")
 
+    prepare_coverage = sub.add_parser(
+        "prepare-coverage",
+        help="Create a family-capped, organism/length-diverse optimization set and fixed family validation set.",
+    )
+    prepare_coverage.add_argument("--max-records-per-family", type=int, default=32)
+    prepare_coverage.add_argument("--validation-fraction", type=float, default=0.05)
+    prepare_coverage.add_argument("--seed", type=int, default=20260711)
+    prepare_coverage.add_argument("--overwrite", action="store_true")
+
+    prepare_structured = sub.add_parser(
+        "prepare-structured-data",
+        help="Build and strictly audit the canonical processed_graph pathway-continuation v3 release.",
+    )
+    prepare_structured.add_argument("--processed-graph-root")
+    prepare_structured.add_argument("--output-dir")
+    prepare_structured.add_argument("--max-length", type=int, default=8192)
+    prepare_structured.add_argument("--test-organisms", default="tru,xtr,dre,gga,dmk,dme,cel")
+    prepare_structured.add_argument("--test-family-fraction", type=float, default=0.05)
+    prepare_structured.add_argument("--validation-family-fraction", type=float, default=0.05)
+    prepare_structured.add_argument("--train-candidate-record-fraction", type=float, default=0.003)
+    prepare_structured.add_argument("--max-records-per-family", type=int, default=256)
+    prepare_structured.add_argument("--max-prefixes-per-train-record", type=int, default=3)
+    prepare_structured.add_argument("--minimum-train-records", type=int, default=12000)
+    prepare_structured.add_argument("--seed", type=int, default=20260711)
+    prepare_structured.add_argument("--progress-every", type=int, default=1000)
+    prepare_structured.add_argument("--overwrite", action="store_true")
+
     download_model = sub.add_parser("download-model", help="Download and verify the pinned Qwen3-8B snapshot.")
     download_model.add_argument("--revision", default="b968826")
     download_model.add_argument("--endpoint")
@@ -488,6 +515,72 @@ def main() -> None:
             command.extend(
                 ["--pathway-family-holdout-seed", str(args.pathway_family_holdout_seed)]
             )
+        if args.overwrite:
+            command.append("--overwrite")
+        raise SystemExit(subprocess.run(command, check=False).returncode)
+
+    if args.command == "prepare-coverage":
+        command = [
+            sys.executable,
+            "-m",
+            "dataprocess.select_training_coverage",
+            "--input",
+            asset_path("data/train_kegg_pathway_record_balanced_0p1pct.csv"),
+            "--train-output",
+            asset_path(
+                f"data/train_kegg_pathway_coverage_cap{args.max_records_per_family}.csv"
+            ),
+            "--validation-output",
+            asset_path("data/validation_kegg_pathway_family.csv"),
+            "--report",
+            asset_path(
+                "artifacts/dataset/"
+                f"family_capped_organism_length_diverse_cap{args.max_records_per_family}_v1.json"
+            ),
+            "--max-records-per-family",
+            str(args.max_records_per_family),
+            "--validation-fraction",
+            str(args.validation_fraction),
+            "--seed",
+            str(args.seed),
+        ]
+        if args.overwrite:
+            command.append("--overwrite")
+        raise SystemExit(subprocess.run(command, check=False).returncode)
+
+    if args.command == "prepare-structured-data":
+        command = [
+            sys.executable,
+            "-m",
+            "dataprocess.build_structured_dataset",
+            "--processed-graph-root",
+            args.processed_graph_root or asset_path("KEGG_all_new/processed_graph"),
+            "--output-dir",
+            args.output_dir
+            or asset_path(f"data/pathway_v3_cap{args.max_records_per_family}"),
+            "--tokenizer",
+            asset_path("models/qwen3_8B"),
+            "--max-length",
+            str(args.max_length),
+            "--test-organisms",
+            args.test_organisms,
+            "--test-family-fraction",
+            str(args.test_family_fraction),
+            "--validation-family-fraction",
+            str(args.validation_family_fraction),
+            "--train-candidate-record-fraction",
+            str(args.train_candidate_record_fraction),
+            "--max-records-per-family",
+            str(args.max_records_per_family),
+            "--max-prefixes-per-train-record",
+            str(args.max_prefixes_per_train_record),
+            "--minimum-train-records",
+            str(args.minimum_train_records),
+            "--seed",
+            str(args.seed),
+            "--progress-every",
+            str(args.progress_every),
+        ]
         if args.overwrite:
             command.append("--overwrite")
         raise SystemExit(subprocess.run(command, check=False).returncode)

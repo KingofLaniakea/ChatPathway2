@@ -1,97 +1,117 @@
-# KEGG pathway dataset contract
+# Pathway-continuation v3 dataset
 
-`build_pathway_csv.py` reads ordered text layers from `processed/` and graph
-metadata/phenotype evidence from `processed_graph/`. One biological record is
-one `(organism, source_json, pathway_id, pathway_block)` identity; every prefix
-row has `sample_id=<record_id>:prefix=<count>`.
+The active builder is `build_structured_dataset.py`. It reads canonical
+`processed_graph/<organism>/<pathway>.json` directly; it does not recover
+events by splitting the concatenated paragraphs under `processed/`.
 
-`pathway_family_id` is the terminal five-digit KEGG reference-map identifier,
-so organism-specific IDs such as `hsa04010` and `mmu04010` belong to the same
-family. It is a split/audit key, not the sample identity.
+## Biological record
 
-This removes exact cross-organism KEGG map-family overlap. It does not prove
-that different map IDs have no shared KO sets or homologous subgraphs; claims
-about that stronger notion require a versioned KO/graph-similarity clustering
-manifest and must be reported separately.
+For each graph, every relation and reaction with resolvable endpoints becomes
+one stable structured event. Topology is built from all such events, including
+events that the historical producer marked `renderable=false`; that flag is
+kept for provenance and a deterministic generic renderer supplies text. A
+graph with any missing event endpoint is excluded rather than partially
+materialized.
 
-## Maintained answer schema
+The builder condenses cycles with Tarjan SCC and creates one sink-rooted view
+per sink SCC. Layers are ordered graph distance from upstream to downstream;
+events in one layer are an unordered set, not measured time. No event is
+deduplicated by text.
+
+Identity is explicit:
+
+- `graph_id`: hash of the relative source path together with the canonical graph JSON content hash;
+- `view_id`: graph plus sorted sink-node signature;
+- `record_id`: graph plus view;
+- `sample_id`: record plus observed-prefix length.
+
+The record JSONL keeps organism, pathway, graph/view/event IDs and source
+paths. Those are provenance metadata, not fields the model must generate.
+
+## Model-visible contract
+
+The question contains only the task instructions, exact JSON shape, and the
+observed structured layers. It contains no explicit pathway name, class, ID,
+block, title, organism, or phenotype field.
+
+The closed target is:
 
 ```json
 {
-  "remaining_steps": [
+  "schema_version": "pathway_continuation_v3",
+  "remaining_layers": [
     {
-      "step": 2,
-      "layer": "layer 2",
-      "substeps": [
+      "layer_index": 2,
+      "events": [
         {
-          "substep": 0,
-          "text": "AKT1 phosphorylates BAD.",
-          "source_item_index": 0
+          "source": [{"canonical_id": "ko:K00001", "name": "A"}],
+          "relation": "activation",
+          "target": [{"canonical_id": "ko:K00002", "name": "B"}],
+          "text": "A activates B."
         }
       ]
     }
-  ],
-  "predicted_phenotype": null
+  ]
 }
 ```
 
-Layers are ordered. `substeps` preserve original source-item boundaries, but
-same-layer item order is serialization provenance, not biological time.
+Phenotype is currently disabled. `phenotype_status=not_annotated` exists only
+in metadata and does not mean a negative phenotype.
 
-## Phenotype policy
+## Split and size policy
 
-- block-level labels may supervise only their own block;
-- file-level labels are inherited only when the file contains one pathway
-  block;
-- a multi-block file-level label becomes `ambiguous_file_level`, never a label
-  copied onto every block;
-- disagreeing block/file sources become `conflict`;
-- read failures become `source_error`;
-- no annotation becomes `not_annotated` with JSON `null`.
+- Test uses selected held-out organisms and held-out five-digit KEGG pathway
+  families simultaneously.
+- Validation holds out separate whole families.
+- Train excludes both test and validation families.
+- Selection is deterministic, prioritizes distinct organisms and trajectory
+  lengths within each family, and defaults to at most 256 records per family.
+- At most three evenly spaced prefix rows are stored per train record; each
+  training epoch chooses one deterministically.
+- The default build fails below 12,000 accepted train records. The first full
+  v3 timing, not the old v2 row count, determines the final one-day budget.
 
-Only `available` rows enter phenotype accuracy. Other statuses remain valid for
-trajectory training but are excluded from phenotype denominators.
+## Token and JSON policy
 
-## Existing server corpus and experiment files
+The real Qwen tokenizer measures the complete chat prompt plus the complete
+assistant answer and `<|im_end|>`. A row above 8192 tokens is excluded before
+writing the release. Training uses the same check and raises if an oversized
+row slips through; assistant JSON is never truncated.
 
-The full server CSVs generated on 2026-07-11 contain 32,258,032 train rows and
-36,327 test rows. They predate the explicit substep/identity schema. Do not
-regenerate 171 GiB merely to start the core benchmark; run:
+Inference performs at most three attempts. Invalid or unclosed output is
+regenerated with an explicit repair turn and larger token budget. The third
+failure is written to progress JSONL and raises an error.
+
+## Build on CFFF
+
+After `processed_graph` and the pinned Qwen tokenizer are present:
 
 ```bash
 export CHATPATHWAY_PROFILE=cfff
-python -m experiments.run_experiment prepare-data --overwrite
-```
-
-This streaming pass creates:
-
-- a record-balanced 0.1% first-round training set that excludes the deterministically reserved
-  KEGG pathway families;
-- strict core/multi-step evaluations whose organisms and pathway families are
-  both absent from training;
-- separate organism-held-out evaluations that intentionally allow and report
-  pathway-family overlap, for the distinct cross-species-transfer question.
-
-It upgrades identity/status/family fields, marks recovered boundaries as
-`sentence_parser_v1`, and performs strict schema, identity, source, record,
-sample, and pathway-family audits. The original organism split is not presented
-as unseen-pathway generalization.
-
-For a future exact rebuild from source JSON:
-
-```bash
-python dataprocess/build_pathway_csv.py \
-  --processed-root ../KEGG_all_new/processed \
-  --processed-graph-root ../KEGG_all_new/processed_graph \
-  --train-output ../data/train_kegg_pathway_dataset.csv \
-  --test-output ../data/test_kegg_pathway_dataset.csv \
-  --test-organisms tru,xtr,dre,gga,dmk,dme,cel \
+python -m experiments.run_experiment prepare-structured-data \
+  --max-records-per-family 256 \
+  --minimum-train-records 12000 \
+  --seed 20260711 \
   --overwrite
 ```
 
-The rebuilt full files above are the organism-transfer source split, so audit
-them with `--allow-pathway-family-overlap`, then run `prepare-data` to create
-the strict family-disjoint core split. The prepared core train/test pair must
-pass `dataprocess/audit_pathway_csv.py --strict` without that allowance.
-Trainers use the pandas C parser and reject malformed rows; they do not silently
-skip oversized or bad CSV records.
+The release is written to `data/pathway_v3_cap256/`:
+
+- train/validation/test CSV compatibility views;
+- one-record-per-line JSONL for all three splits;
+- `dataset_manifest.json`;
+- generated read-only `data_audit.json`.
+
+`data_audit.json` contains row, record, source and family counts; strict
+source/record/sample/family overlap; organism overlap; duplicate ID checks;
+phenotype and parser status; event coverage; layer-length and token-length
+distributions; truncation exclusions; and graph-artifact coverage. The CFFF
+experiment scheduler verifies its pass status, read-only mode, manifest hash,
+and all split hashes before allocating GPUs.
+
+## Historical builders
+
+`build_pathway_csv.py`, `prepare_experiment_data.py`, and
+`select_training_coverage.py` remain for reproducing the v2 paragraph-based
+corpus. Their `sentence_parser_v1` boundaries and phenotype ambiguity policy
+must not be presented as the v3 canonical event release.
