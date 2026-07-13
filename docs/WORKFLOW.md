@@ -3,9 +3,11 @@
 The exact current data-layer status is frozen in
 [DATASET_STATUS_2026-07-13.md](DATASET_STATUS_2026-07-13.md).
 
-The maintained direct inference cap is 1024 generated tokens. The strict core
-gold answers have a measured maximum of 925 tokens, so this cap covers the
-reference distribution while limiting non-terminating repetition.
+Maintained direct inference fixes per-process `batch_size=1` and caps generation
+at 1024 tokens. Batch 8 changed 6 of the first 40 audited greedy trajectories,
+so four-GPU acceleration uses only mutually exclusive data shards. The strict
+core gold answers have a measured maximum of 925 tokens, so the generation cap
+covers the reference distribution while limiting non-terminating repetition.
 Inference also writes one record per completed sample to a progress JSONL. A
 single-GPU wrapper uses `direct.progress.jsonl`; the four-GPU CFFF scheduler
 uses `direct.progress.shard-*-of-*.jsonl` while running and creates the canonical

@@ -16,6 +16,7 @@ DEFAULT_EXPERIMENT_SEED = "20260711"
 CONTROLLED_MAX_LENGTH = "8192"
 CONTROLLED_MAX_NEW_TOKENS = "1024"
 CONTROLLED_TRAIN_BATCH_SIZE = "1"
+CONTROLLED_INFERENCE_BATCH_SIZE = "1"
 CONTROLLED_VALIDATION_GROUP_COLUMN = "pathway_family_id"
 
 
@@ -36,6 +37,8 @@ def controlled_inference_budget_args() -> list[str]:
     """Prompt and generation budgets paired with the controlled matrix."""
 
     return [
+        "--batch-size",
+        CONTROLLED_INFERENCE_BATCH_SIZE,
         "--max-length",
         CONTROLLED_MAX_LENGTH,
         "--max-new-tokens",

@@ -36,9 +36,13 @@ rows have no complete semantic layer inside the text budget and therefore
 contribute CE but no dynamics loss. Truncation counters remain mandatory
 reported metrics.
 
-Direct inference pins `max_new_tokens=1024`. On the 764-row strict core
-evaluation, the longest gold answer is 925 tokens (99th percentile 678), so
-the cap covers every gold target while bounding non-terminating repetition.
+Direct inference pins per-process `batch_size=1` and
+`max_new_tokens=1024`. Batch size is an experimental control: an audited
+batch-8 attempt changed 6 of the first 40 greedy token trajectories relative
+to batch 1, even when some changes were only same-layer substep permutations.
+Four-GPU speedup therefore comes only from disjoint data shards. On the 764-row
+strict core evaluation, the longest gold answer is 925 tokens (99th percentile
+678), so the cap covers every gold target while bounding non-terminating repetition.
 Every completed sample is immediately appended to a progress JSONL with its
 identity, gold answer, prediction, finish reason, and JSON/schema validity. A
 direct one-GPU wrapper writes `direct.progress.jsonl`. The CFFF scheduler writes
