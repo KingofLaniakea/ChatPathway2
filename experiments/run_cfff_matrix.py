@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Dependency-aware four-GPU scheduler for the maintained CFFF matrix.
 
-Stage-1 SFT is a real four-process DDP job. AE and stage-2 arms are independent
-single-GPU jobs. Each direct-inference job is split into deterministic strided
-shards, one model replica per GPU, followed by a verified CPU-light merge that
-restores source order and rejects gaps, duplicates, or provenance drift.
+Stage-1 SFT is a real four-process DDP job and the shared AE remains a single-GPU
+prerequisite.  The primary forced/damped HNN then receives all four GPUs; after
+it completes, pure HNN and the compute-matched stage-2 SFT control each receive
+two GPUs concurrently.  Per-process gradient accumulation is adjusted so all
+stage-2 arms retain an effective global batch of 12 examples per optimizer
+update.  Each direct-inference job is split into deterministic strided shards,
+followed by a verified merge that restores source order and rejects gaps,
+duplicates, or provenance drift.
 """
 
 from __future__ import annotations
@@ -24,10 +28,21 @@ from experiments.runtime_config import asset_root
 
 
 STAGE2_IDS = (
-    "exp003_stage2_sft_only_direct",
-    "exp001_hnn_reconae_joint_direct",
     "exp002_forced_damped_hnn_reconae_joint_direct",
+    "exp001_hnn_reconae_joint_direct",
+    "exp003_stage2_sft_only_direct",
 )
+
+STAGE2_RESOURCES = {
+    "exp002_forced_damped_hnn_reconae_joint_direct": 4,
+    "exp001_hnn_reconae_joint_direct": 2,
+    "exp003_stage2_sft_only_direct": 2,
+}
+
+STAGE2_ACCUMULATION_STEPS = {
+    experiment_id: 12 // resources
+    for experiment_id, resources in STAGE2_RESOURCES.items()
+}
 
 
 @dataclass(frozen=True)
@@ -270,13 +285,23 @@ def build_jobs(
             train_key = f"{seed}:{experiment_id}:train"
             infer_key = f"{seed}:{experiment_id}:infer"
             checkpoint = seed_root / f"experiments/{experiment_id}/final_lora/checkpoint_best"
+            resources = STAGE2_RESOURCES[experiment_id]
             jobs.append(
                 Job(
                     key=train_key,
                     seed=seed,
-                    resources=1,
+                    resources=resources,
                     dependencies=(ae_key,),
-                    command=experiment_command(python, "train", experiment_id, seed),
+                    command=experiment_command(
+                        python,
+                        "train",
+                        experiment_id,
+                        seed,
+                        (
+                            "--gradient-accumulation-steps",
+                            str(STAGE2_ACCUMULATION_STEPS[experiment_id]),
+                        ),
+                    ),
                     outputs=(
                         checkpoint / "adapter_model.safetensors",
                         checkpoint / "hamiltonian_dynamics.pt",
@@ -412,14 +437,15 @@ def run_scheduler(
             ready.sort(key=lambda job: (-job.resources, job.key))
             launched = False
             for job in ready:
-                if job.resources == 4:
-                    if running or len(free) < 4:
-                        continue
-                    assigned = tuple(gpus)
-                else:
-                    if not free:
-                        break
-                    assigned = (free.pop(0),)
+                if not 1 <= job.resources <= len(gpus):
+                    raise ValueError(
+                        f"job {job.key!r} requests {job.resources} GPUs; "
+                        f"available scheduler width is {len(gpus)}"
+                    )
+                if len(free) < job.resources:
+                    continue
+                assigned = tuple(free[: job.resources])
+                del free[: job.resources]
 
                 job_log = log_dir / f"{job.key.replace(':', '__')}.log"
                 handle = job_log.open("wb")
@@ -437,8 +463,6 @@ def run_scheduler(
                 )
                 running[job.key] = RunningJob(job, assigned, process, handle, job_log)
                 pending.pop(job.key)
-                if job.resources == 4:
-                    free.clear()
                 print(f"started\t{job.key}\tgpus={','.join(assigned)}\tlog={job_log}")
                 launched = True
 
