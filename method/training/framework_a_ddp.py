@@ -11,6 +11,7 @@ step because its public ``regularization_loss`` API is used outside
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import math
 import os
@@ -59,6 +60,12 @@ from method.training.framework_a import (
     save_checkpoint,
     unwrap_state_dict,
 )
+
+
+def _format_manifest_log_value(value: Any) -> str:
+    """Serialize structured manifest fields for deterministic log records."""
+
+    return json.dumps(value, sort_keys=True)
 
 
 LOSS_KEYS = ("total", "sft", "align", "state", "latent_state", "regularization")
@@ -564,7 +571,7 @@ def train(cfg: TrainConfig | None = None) -> None:
             write_json(save_root / "run_manifest.json", manifest)
             logger.info(
                 "validation_prefix_selection=%s",
-                json.dumps(manifest["validation_prefix_selection"], sort_keys=True),
+                _format_manifest_log_value(manifest["validation_prefix_selection"]),
             )
         train_sampler = (
             MatchedGlobalBatchTrainSampler(

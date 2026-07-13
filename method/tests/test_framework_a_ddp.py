@@ -6,10 +6,21 @@ try:
     from method.training.framework_a_ddp import (
         MatchedGlobalBatchTrainSampler,
         StridedEvaluationSampler,
+        _format_manifest_log_value,
     )
 except ModuleNotFoundError:  # Minimal local environments may omit PyTorch.
     MatchedGlobalBatchTrainSampler = None  # type: ignore[assignment,misc]
     StridedEvaluationSampler = None  # type: ignore[assignment,misc]
+    _format_manifest_log_value = None  # type: ignore[assignment,misc]
+
+
+@unittest.skipIf(_format_manifest_log_value is None, "PyTorch is required")
+class ManifestLoggingTests(unittest.TestCase):
+    def test_structured_values_are_serialized_deterministically(self) -> None:
+        self.assertEqual(
+            _format_manifest_log_value({"z": 2, "a": 1}),
+            '{"a": 1, "z": 2}',
+        )
 
 
 @unittest.skipIf(StridedEvaluationSampler is None, "PyTorch is required")
