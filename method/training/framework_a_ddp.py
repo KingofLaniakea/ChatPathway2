@@ -173,6 +173,30 @@ def effective_global_batch_size(cfg: TrainConfig, world_size: int) -> int:
     return cfg.batch_size * cfg.gradient_accumulation_steps * world_size
 
 
+def ensure_peft_transformers_compatibility() -> bool:
+    """Bridge PEFT 0.19 with Transformers builds lacking one TP marker.
+
+    PEFT 0.19 imports ``EmbeddingParallel`` unconditionally while loading an
+    adapter, even when the model has no tensor-parallel device mesh.  Some
+    Transformers 4.57 builds do not export that marker.  A placeholder is
+    sufficient for the non-TP path used here and avoids changing the running
+    server environment during a formal experiment.
+
+    Returns ``True`` only when the marker had to be installed.
+    """
+
+    from transformers.integrations import tensor_parallel
+
+    if hasattr(tensor_parallel, "EmbeddingParallel"):
+        return False
+
+    class EmbeddingParallel:  # pragma: no cover - behavior is environment-version specific
+        pass
+
+    tensor_parallel.EmbeddingParallel = EmbeddingParallel
+    return True
+
+
 def _dataset(
     frame: Any,
     tokenizer: Any,
@@ -395,6 +419,11 @@ def train(cfg: TrainConfig | None = None) -> None:
         base_model.config.use_cache = False
         if cfg.gradient_checkpointing:
             base_model.gradient_checkpointing_enable()
+        compatibility_patch_applied = ensure_peft_transformers_compatibility()
+        if is_main and compatibility_patch_applied:
+            logger.info(
+                "installed non-TP EmbeddingParallel compatibility marker for PEFT/Transformers"
+            )
         model: nn.Module = PeftModel.from_pretrained(
             base_model,
             cfg.sft_lora,
