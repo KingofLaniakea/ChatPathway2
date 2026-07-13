@@ -11,7 +11,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 from downstream.common.pathway_json import parse_pathway_payload
-from method.inference.csv_io import read_csv_text_rows
+from method.inference.csv_io import read_csv_text_rows, select_strided_shard
 from method.training.common import file_sha256, git_commit, seed_everything
 from method.training.sequence import trim_prompt_ids
 
@@ -32,6 +32,8 @@ class InferenceConfig:
     max_length: int
     max_new_tokens: int
     limit: int | None
+    shard_count: int
+    shard_index: int
     seed: int
     device: str
     overwrite: bool
@@ -56,6 +58,18 @@ def parse_args() -> InferenceConfig:
     parser.add_argument("--max-length", type=int, default=1072)
     parser.add_argument("--max-new-tokens", type=int, default=1024)
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="Split the post-limit input into this many deterministic strided shards.",
+    )
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Zero-based shard to evaluate; pair with unique output/progress paths.",
+    )
     parser.add_argument("--seed", type=int, default=20260711)
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--overwrite", action="store_true", help="Allow replacing an existing output CSV.")
@@ -65,6 +79,10 @@ def parse_args() -> InferenceConfig:
         help="Require a trainer run_complete.json marker with status=completed before inference.",
     )
     args = parser.parse_args()
+    if args.shard_count < 1:
+        parser.error("--shard-count must be positive")
+    if not 0 <= args.shard_index < args.shard_count:
+        parser.error("--shard-index must be in [0, --shard-count)")
     return InferenceConfig(
         base_model_id=args.base_model,
         trained_lora_path=args.adapter,
@@ -75,6 +93,8 @@ def parse_args() -> InferenceConfig:
         max_length=args.max_length,
         max_new_tokens=args.max_new_tokens,
         limit=args.limit,
+        shard_count=args.shard_count,
+        shard_index=args.shard_index,
         seed=args.seed,
         device=args.device,
         overwrite=args.overwrite,
@@ -111,6 +131,7 @@ def run_inference(cfg: InferenceConfig) -> None:
         progress_path.unlink()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.touch()
     print(f"Using device: {cfg.device}")
     
     # 1. 初始化 Tokenizer
@@ -137,12 +158,23 @@ def run_inference(cfg: InferenceConfig) -> None:
     
     # 3. 读取测试集
     print(f"Reading test dataset from {cfg.test_data_path}...")
-    fieldnames, rows = read_csv_text_rows(cfg.test_data_path, limit=cfg.limit)
+    fieldnames, all_rows = read_csv_text_rows(cfg.test_data_path, limit=cfg.limit)
+    indexed_rows = select_strided_shard(
+        all_rows,
+        shard_index=cfg.shard_index,
+        shard_count=cfg.shard_count,
+    )
+    source_indices = [index for index, _ in indexed_rows]
+    rows = [row for _, row in indexed_rows]
     df = pd.DataFrame(rows, columns=fieldnames)
+    df.insert(0, "dataset_index", source_indices)
     
     # 打印检查，确保读取进来时列结构是完好的
     print(f"Dataset columns detected: {list(df.columns)}")
-    print(f"Total samples to process: {len(df)}")
+    print(
+        f"Total samples to process: {len(df)} "
+        f"(shard {cfg.shard_index + 1}/{cfg.shard_count}; full post-limit input={len(all_rows)})"
+    )
     if "question" not in df.columns:
         raise ValueError("Input CSV must contain a 'question' column.")
 
@@ -209,7 +241,8 @@ def run_inference(cfg: InferenceConfig) -> None:
             
         # 解码并提取 Assistant 回答部分
         for j, out_ids in enumerate(outputs):
-            sample_index = len(predicted_answers)
+            local_sample_index = len(predicted_answers)
+            sample_index = source_indices[local_sample_index]
             # 获取输入 Prompt 的 token 长度，防止把 Prompt 重新打印出来
             input_len = inputs["input_ids"][j].shape[0]
             raw_gen_ids = out_ids[input_len:]
@@ -250,7 +283,7 @@ def run_inference(cfg: InferenceConfig) -> None:
             json_validity.append(json_valid)
             schema_validity.append(schema_valid)
             predicted_answers.append(gen_text)
-            source_row = rows[sample_index]
+            source_row = rows[local_sample_index]
             with progress_path.open("a", encoding="utf-8") as progress_handle:
                 progress_handle.write(
                     json.dumps(
@@ -300,7 +333,8 @@ def run_inference(cfg: InferenceConfig) -> None:
                 ),
                 "progress_output": str(progress_path),
                 "progress_output_sha256": file_sha256(progress_path),
-                "input_rows": len(df),
+                "input_rows": len(all_rows),
+                "evaluated_rows": len(df),
                 "finish_reason_counts": {
                     str(key): int(value)
                     for key, value in df["finish_reason"].value_counts().items()

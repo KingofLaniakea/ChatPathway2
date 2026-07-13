@@ -6,9 +6,12 @@ The exact current data-layer status is frozen in
 The maintained direct inference cap is 1024 generated tokens. The strict core
 gold answers have a measured maximum of 925 tokens, so this cap covers the
 reference distribution while limiting non-terminating repetition.
-Inference also writes one record per completed sample to
-`direct.progress.jsonl`; use this for live examples and crash diagnosis without
-mistaking it for the final aggregate CSV.
+Inference also writes one record per completed sample to a progress JSONL. A
+single-GPU wrapper uses `direct.progress.jsonl`; the four-GPU CFFF scheduler
+uses `direct.progress.shard-*-of-*.jsonl` while running and creates the canonical
+progress file only after duplicate-free, complete, source-identity-preserving
+merge. Use these files for live examples and crash diagnosis without mistaking
+them for the final aggregate CSV.
 
 Run from the `ChatPathway2` repository root. On CFFF:
 

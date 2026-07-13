@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from method.inference.csv_io import read_csv_text_rows
+from method.inference.csv_io import read_csv_text_rows, select_strided_shard
 
 
 class InferenceCsvIoTests(unittest.TestCase):
@@ -43,6 +43,23 @@ class InferenceCsvIoTests(unittest.TestCase):
             _, rows = read_csv_text_rows(path, limit=1)
 
         self.assertEqual(rows, [{"id": "00001"}])
+
+    def test_strided_shards_are_disjoint_complete_and_keep_global_indices(self) -> None:
+        rows = [{"id": str(index)} for index in range(11)]
+        shards = [
+            select_strided_shard(rows, shard_index=index, shard_count=4)
+            for index in range(4)
+        ]
+
+        flattened = sorted(item for shard in shards for item in shard)
+        self.assertEqual(flattened, list(enumerate(rows)))
+        self.assertEqual([index for index, _ in shards[2]], [2, 6, 10])
+
+    def test_strided_shard_rejects_invalid_coordinates(self) -> None:
+        with self.assertRaises(ValueError):
+            select_strided_shard([], shard_index=0, shard_count=0)
+        with self.assertRaises(ValueError):
+            select_strided_shard([], shard_index=4, shard_count=4)
 
 
 if __name__ == "__main__":

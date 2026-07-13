@@ -39,9 +39,11 @@ reported metrics.
 Direct inference pins `max_new_tokens=1024`. On the 764-row strict core
 evaluation, the longest gold answer is 925 tokens (99th percentile 678), so
 the cap covers every gold target while bounding non-terminating repetition.
-Every completed sample is immediately appended to `direct.progress.jsonl`
-with its identity, gold answer, prediction, finish reason, and JSON/schema
-validity. The final CSV is still written only after the complete run.
+Every completed sample is immediately appended to a progress JSONL with its
+identity, gold answer, prediction, finish reason, and JSON/schema validity. A
+direct one-GPU wrapper writes `direct.progress.jsonl`. The CFFF scheduler writes
+four `direct.progress.shard-*-of-*.jsonl` files live, then verifies and merges
+them into `direct.progress.jsonl` and the final CSV in original dataset order.
 
 Checkpoint selection uses a deterministic `pathway_family_id` validation split,
 not a row or source-only split. For seeds `20260711/12/13`, validation contains
@@ -77,9 +79,10 @@ python -m experiments.run_experiment infer exp002_forced_damped_hnn_reconae_join
 
 ## Four-A100 CFFF schedule
 
-The shared SFT is a four-process DDP job. AE, each stage-2 arm, and each
-inference job are single-GPU by design. To keep the machine busy without
-claiming false model-parallelism, run the dependency-aware scheduler:
+The shared SFT is a four-process DDP job. AE and each stage-2 arm are
+single-GPU jobs. Direct inference uses four independent model replicas on
+mutually exclusive strided input shards; this is data-parallel evaluation, not
+model parallelism. Run the dependency-aware scheduler:
 
 ```bash
 python -m experiments.run_cfff_matrix \
@@ -88,12 +91,15 @@ python -m experiments.run_cfff_matrix \
 ```
 
 It runs the three SFT prerequisites sequentially with all four GPUs, then fills
-the GPUs with independent AE, stage-2 control/HNN/forced-damped jobs and direct
-inference as their dependencies become available. Completed outputs are skipped
-on restart only when the trainer's atomic `run_complete.json` marker and
-required checkpoints all exist. Partial non-empty trainer directories fail
-closed instead of being mistaken for a finished run or overwritten. Inspect
-the plan without launching with `--dry-run`.
+the GPUs with independent AE, stage-2 control/HNN/forced-damped jobs and
+inference shards as their dependencies become available. The merge rejects a
+missing or duplicate dataset index, changed source field, mismatched shard run
+configuration, or progress hash before creating canonical outputs. Completed
+outputs are skipped on restart only when the trainer's atomic
+`run_complete.json` marker and required checkpoints all exist. Partial
+non-empty trainer directories fail closed instead of being mistaken for a
+finished run or overwritten. Inspect the plan without launching with
+`--dry-run`; `--inference-shards 1..4` controls evaluation parallelism.
 
 Every trainer refuses a non-empty output directory. Passing a different seed
 selects a different artifact tree; it does not change the prepared training rows.

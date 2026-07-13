@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import TypeVar
+
+
+Row = TypeVar("Row")
 
 
 def read_csv_text_rows(
@@ -45,4 +49,28 @@ def read_csv_text_rows(
     return fieldnames, rows
 
 
-__all__ = ["read_csv_text_rows"]
+def select_strided_shard(
+    rows: list[Row],
+    *,
+    shard_index: int,
+    shard_count: int,
+) -> list[tuple[int, Row]]:
+    """Return one deterministic shard while preserving global row indices.
+
+    Striding balances long and short generations better than contiguous slices.
+    The original index is carried into every progress record and shard CSV so a
+    merger can prove exact, duplicate-free coverage and restore input order.
+    """
+
+    if shard_count < 1:
+        raise ValueError("shard_count must be positive")
+    if not 0 <= shard_index < shard_count:
+        raise ValueError("shard_index must be in [0, shard_count)")
+    return [
+        (index, row)
+        for index, row in enumerate(rows)
+        if index % shard_count == shard_index
+    ]
+
+
+__all__ = ["read_csv_text_rows", "select_strided_shard"]

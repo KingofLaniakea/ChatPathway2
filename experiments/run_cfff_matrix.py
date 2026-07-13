@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Dependency-aware four-GPU scheduler for the maintained CFFF matrix.
 
-Stage-1 SFT is a real four-process DDP job.  AE, stage-2 arms, and inference
-are intentionally single-GPU jobs; after the SFT prerequisites finish, this
-scheduler fills the four GPUs with independent seed/arm jobs instead of
-pretending that every small auxiliary module benefits from model parallelism.
+Stage-1 SFT is a real four-process DDP job. AE and stage-2 arms are independent
+single-GPU jobs. Each direct-inference job is split into deterministic strided
+shards, one model replica per GPU, followed by a verified CPU-light merge that
+restores source order and rejects gaps, duplicates, or provenance drift.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ class Job:
     dependencies: tuple[str, ...]
     command: tuple[str, ...]
     outputs: tuple[Path, ...]
+    skip_if_outputs: tuple[Path, ...] = ()
 
 
 @dataclass
@@ -63,7 +64,13 @@ def parse_csv_strings(value: str) -> list[str]:
     return values
 
 
-def experiment_command(python: str, phase: str, experiment_id: str, seed: int) -> tuple[str, ...]:
+def experiment_command(
+    python: str,
+    phase: str,
+    experiment_id: str,
+    seed: int,
+    extra_args: Iterable[str] = (),
+) -> tuple[str, ...]:
     return (
         python,
         "-m",
@@ -73,10 +80,103 @@ def experiment_command(python: str, phase: str, experiment_id: str, seed: int) -
         "--",
         "--seed",
         str(seed),
+        *extra_args,
     )
 
 
-def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
+def shard_path(path: Path, shard_index: int, shard_count: int) -> Path:
+    return path.with_name(
+        f"{path.stem}.shard-{shard_index:05d}-of-{shard_count:05d}{path.suffix}"
+    )
+
+
+def build_inference_jobs(
+    *,
+    seed: int,
+    experiment_id: str,
+    key_prefix: str,
+    dependency: str,
+    test: Path,
+    run_directory: Path,
+    python: str,
+    shard_count: int,
+) -> list[Job]:
+    output = run_directory / "direct.csv"
+    progress = run_directory / "direct.progress.jsonl"
+    final_outputs = (output, progress, output.with_suffix(".run.json"))
+    shard_jobs: list[Job] = []
+    shard_outputs: list[Path] = []
+    shard_progress: list[Path] = []
+    shard_keys: list[str] = []
+    for shard_index in range(shard_count):
+        shard_output = shard_path(output, shard_index, shard_count)
+        shard_progress_path = shard_path(progress, shard_index, shard_count)
+        shard_key = f"{key_prefix}:shard{shard_index}"
+        shard_jobs.append(
+            Job(
+                key=shard_key,
+                seed=seed,
+                resources=1,
+                dependencies=(dependency,),
+                command=experiment_command(
+                    python,
+                    "infer",
+                    experiment_id,
+                    seed,
+                    (
+                        "--shard-count", str(shard_count),
+                        "--shard-index", str(shard_index),
+                        "--output", str(shard_output),
+                        "--progress-output", str(shard_progress_path),
+                        "--overwrite",
+                    ),
+                ),
+                outputs=(
+                    shard_output,
+                    shard_progress_path,
+                    shard_output.with_suffix(".run.json"),
+                ),
+                skip_if_outputs=final_outputs,
+            )
+        )
+        shard_outputs.append(shard_output)
+        shard_progress.append(shard_progress_path)
+        shard_keys.append(shard_key)
+    merge_command = [
+        python,
+        "-m",
+        "method.inference.merge_pathway_shards",
+        "--input",
+        str(test),
+        "--output",
+        str(output),
+        "--progress-output",
+        str(progress),
+        "--overwrite",
+    ]
+    for shard_output, shard_progress_path in zip(shard_outputs, shard_progress):
+        merge_command.extend(("--shard-output", str(shard_output)))
+        merge_command.extend(("--shard-progress", str(shard_progress_path)))
+    return [
+        *shard_jobs,
+        Job(
+            key=key_prefix,
+            seed=seed,
+            resources=1,
+            dependencies=tuple(shard_keys),
+            command=tuple(merge_command),
+            outputs=final_outputs,
+        ),
+    ]
+
+
+def build_jobs(
+    seeds: Iterable[int],
+    root: Path,
+    python: str,
+    *,
+    inference_shards: int = 4,
+) -> list[Job]:
     jobs: list[Job] = []
     model = root / "models/qwen3_8B"
     train = root / "data/train_kegg_pathway_record_balanced_0p1pct.csv"
@@ -151,19 +251,16 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
             )
         )
 
-        baseline_key = f"{seed}:exp000:infer"
-        jobs.append(
-            Job(
-                key=baseline_key,
+        jobs.extend(
+            build_inference_jobs(
                 seed=seed,
-                resources=1,
-                dependencies=(sft_key,),
-                command=experiment_command(python, "infer", "exp000_sft_only_direct", seed),
-                outputs=(
-                    run_root / "exp000_sft_only_direct/direct.csv",
-                    run_root / "exp000_sft_only_direct/direct.progress.jsonl",
-                    run_root / "exp000_sft_only_direct/direct.run.json",
-                ),
+                experiment_id="exp000_sft_only_direct",
+                key_prefix=f"{seed}:exp000:infer",
+                dependency=sft_key,
+                test=test,
+                run_directory=run_root / "exp000_sft_only_direct",
+                python=python,
+                shard_count=inference_shards,
             )
         )
 
@@ -186,18 +283,16 @@ def build_jobs(seeds: Iterable[int], root: Path, python: str) -> list[Job]:
                     ),
                 )
             )
-            jobs.append(
-                Job(
-                    key=infer_key,
+            jobs.extend(
+                build_inference_jobs(
                     seed=seed,
-                    resources=1,
-                    dependencies=(train_key,),
-                    command=experiment_command(python, "infer", experiment_id, seed),
-                    outputs=(
-                        run_root / f"{experiment_id}/direct.csv",
-                        run_root / f"{experiment_id}/direct.progress.jsonl",
-                        run_root / f"{experiment_id}/direct.run.json",
-                    ),
+                    experiment_id=experiment_id,
+                    key_prefix=infer_key,
+                    dependency=train_key,
+                    test=test,
+                    run_directory=run_root / experiment_id,
+                    python=python,
+                    shard_count=inference_shards,
                 )
             )
     return jobs
@@ -210,7 +305,10 @@ def command_string(command: tuple[str, ...]) -> str:
 
 
 def outputs_complete(job: Job) -> bool:
-    return bool(job.outputs) and all(path.exists() for path in job.outputs)
+    return (
+        (bool(job.outputs) and all(path.exists() for path in job.outputs))
+        or (bool(job.skip_if_outputs) and all(path.exists() for path in job.skip_if_outputs))
+    )
 
 
 def validate_inputs(root: Path) -> None:
@@ -344,6 +442,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=parse_csv_ints, default=parse_csv_ints("20260711,20260712,20260713"))
     parser.add_argument("--gpus", type=parse_csv_strings, default=parse_csv_strings("0,1,2,3"))
     parser.add_argument("--profile", default="cfff")
+    parser.add_argument("--inference-shards", type=int, default=4)
     parser.add_argument("--log-dir")
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
@@ -351,6 +450,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.poll_seconds <= 0:
         parser.error("--poll-seconds must be positive")
+    if not 1 <= args.inference_shards <= 4:
+        parser.error("--inference-shards must be between 1 and 4")
     return args
 
 
@@ -359,7 +460,12 @@ def main() -> None:
     root = asset_root(args.profile)
     if not args.dry_run:
         validate_inputs(root)
-    jobs = build_jobs(args.seeds, root, sys.executable)
+    jobs = build_jobs(
+        args.seeds,
+        root,
+        sys.executable,
+        inference_shards=args.inference_shards,
+    )
     log_dir = Path(args.log_dir) if args.log_dir else root / "runs/cfff_matrix_scheduler"
     raise SystemExit(
         run_scheduler(
