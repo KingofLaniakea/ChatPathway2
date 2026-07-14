@@ -213,6 +213,40 @@ class StrictGraphSemanticsTests(unittest.TestCase):
         self.assertEqual(reversible.topology_arcs, ((1, 2), (2, 1)))
         self.assertEqual(reversible.topology_role, TOPOLOGY_BACKBONE)
 
+    def test_self_loop_topology_arc_survives_record_round_trip(self) -> None:
+        graph = self.graph(
+            nodes=[node(1, "A"), node(2, "B")],
+            relations=[
+                relation(0, 1, 1, renderable=True),
+                relation(1, 1, 2, renderable=True),
+            ],
+        )
+        records = build_structured_records(
+            graph,
+            graph_id="graph:self-loop",
+            source_graph_json="aaa/aaa00010.json",
+        )
+        self.assertEqual(len(records), 1)
+        events = {
+            event.event_id: event
+            for layer in records[0].layers
+            for event in layer.events
+        }
+        self.assertEqual(events["relation:0"].topology_arcs, ((1, 1),))
+        payload = records[0].record_object()
+        rebuilt = record_from_object(payload)
+        self.assertEqual(rebuilt.record_object(), payload)
+
+        self_loop = next(
+            event
+            for layer in payload["layers"]
+            for event in layer["events"]
+            if event["event_id"] == "relation:0"
+        )
+        self_loop["topology_arcs"].append([1, 1])
+        with self.assertRaisesRegex(ValueError, "topology_arcs contain duplicates"):
+            record_from_object(payload)
+
     def test_relation_direction_context_and_missing_are_separate(self) -> None:
         nodes = [node(index, chr(64 + index)) for index in range(1, 4)]
         lookup = {int(value["node_id"]): value for value in nodes}

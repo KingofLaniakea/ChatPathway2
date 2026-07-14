@@ -128,20 +128,22 @@ def _strict_strings(value: object, *, field: str) -> tuple[str, ...]:
 def _strict_integer_list(value: object, *, field: str) -> tuple[int, ...]:
     if not isinstance(value, (list, tuple)):
         raise EventValidationError(f"{field} must be a list")
-    output: list[int] = []
-    for item in value:
-        if isinstance(item, bool):
-            raise EventValidationError(f"{field} contains a boolean")
-        try:
-            parsed = int(item)
-        except (TypeError, ValueError) as exc:
-            raise EventValidationError(f"{field} contains an invalid integer") from exc
-        if parsed <= 0:
-            raise EventValidationError(f"{field} must contain positive integers")
-        output.append(parsed)
+    output = [_strict_positive_integer(item, field=field) for item in value]
     if len(set(output)) != len(output):
         raise EventValidationError(f"{field} contains duplicate node IDs")
     return tuple(output)
+
+
+def _strict_positive_integer(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise EventValidationError(f"{field} contains a boolean")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise EventValidationError(f"{field} contains an invalid integer") from exc
+    if parsed <= 0:
+        raise EventValidationError(f"{field} must contain positive integers")
+    return parsed
 
 
 def _strict_event_id(record: dict[str, Any], key: str) -> int:
@@ -1121,10 +1123,11 @@ def _record_event_from_object(value: object) -> StructuredEvent:
         raise ValueError("structured record topology_arcs must be a list")
     topology_arcs: list[tuple[int, int]] = []
     for raw_arc in raw_arcs:
-        arc = _strict_integer_list(raw_arc, field="record.topology_arc")
-        if len(arc) != 2:
+        if not isinstance(raw_arc, (list, tuple)) or len(raw_arc) != 2:
             raise ValueError("structured record topology_arc must contain two nodes")
-        topology_arcs.append((arc[0], arc[1]))
+        source = _strict_positive_integer(raw_arc[0], field="record.topology_arc")
+        target = _strict_positive_integer(raw_arc[1], field="record.topology_arc")
+        topology_arcs.append((source, target))
     if len(set(topology_arcs)) != len(topology_arcs):
         raise ValueError("structured record topology_arcs contain duplicates")
     core_included = value.get("core_included")

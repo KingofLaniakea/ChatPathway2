@@ -487,8 +487,25 @@ def _scan_graph_task(task: GraphScanTask, config: GraphScanConfig) -> GraphScanR
     stats["views_built"] += len(records)
     if not structural_events:
         stats["graphs_without_structural_events"] += 1
+    try:
+        record_payloads = [
+            (record, record.record_object())
+            for record in records
+        ]
+        for _record, payload in record_payloads:
+            rebuilt = record_from_object(payload)
+            if rebuilt.record_object() != payload:
+                raise ValueError("structured record round-trip changed canonical payload")
+    except (KeyError, TypeError, ValueError) as exc:
+        stats["graphs_failed_record_roundtrip"] += 1
+        return GraphScanResult(
+            task.relative,
+            tuple(sorted(stats.items())),
+            error_label="invalid_record_roundtrip",
+            error_message=_stable_scan_error(exc),
+        )
     candidates: list[tuple[object, ...]] = []
-    for record in records:
+    for record, record_payload in record_payloads:
         if record.organism != task.organism or record.family != task.family:
             stats["views_excluded_source_identity_mismatch"] += 1
             continue
@@ -505,7 +522,7 @@ def _scan_graph_task(task: GraphScanTask, config: GraphScanConfig) -> GraphScanR
                 record.source_graph_json,
                 len(record.layers),
                 stable_rank(record.record_id, config.seed),
-                compact_json(record.record_object()),
+                compact_json(record_payload),
             )
         )
         stats["candidate_records"] += 1
@@ -973,6 +990,7 @@ def write_selected_split(
     seed: int,
     maximum_records: int = 0,
     target_input_tokens_per_epoch: int = 0,
+    progress_every: int = 0,
 ) -> dict[str, Any]:
     csv_temporary = csv_path.with_suffix(csv_path.suffix + ".tmp")
     records_temporary = record_path.with_suffix(record_path.suffix + ".tmp")
@@ -992,7 +1010,15 @@ def write_selected_split(
     # Candidates arrive in family order and graph-round-robin order.  A record
     # consumes a family slot only after at least one complete row passes the
     # token budget, so an over-budget record is backfilled by the next view.
-    for selected_row in selected:
+    for candidate_index, selected_row in enumerate(selected, start=1):
+        if progress_every and candidate_index % progress_every == 0:
+            print(
+                f"materializing_split={split} "
+                f"candidate_records_considered={candidate_index} "
+                f"accepted_records={len(packages)}",
+                file=sys.stderr,
+                flush=True,
+            )
         if maximum_records and len(packages) >= maximum_records:
             stats["candidate_records_skipped_global_cap"] += 1
             continue
@@ -1517,6 +1543,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.coverage_graphs_per_train_organism
             ),
         )
+        if scan_stats.get("graphs_failed_record_roundtrip", 0):
+            raise ValueError(
+                "strict build found canonical record round-trip failures: "
+                f"{scan_stats['graphs_failed_record_roundtrip']} graphs"
+            )
         selected = {
             split: select_records(connection, split)
             for split in SPLITS
@@ -1570,6 +1601,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             target_input_tokens_per_epoch=(
                 args.target_train_input_tokens_per_epoch if split == "train" else 0
             ),
+            progress_every=args.progress_every,
         )
     partition_identities = {
         split: record_partition_identities(paths[f"{split}_records"])

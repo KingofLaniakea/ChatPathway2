@@ -240,6 +240,13 @@ class GraphSelectionTests(unittest.TestCase):
                     mock.patch.object(builder, "graph_id_for_source", return_value="graph:test"),
                     mock.patch.object(builder, "graph_events", return_value=((object(),), 0)),
                     mock.patch.object(builder, "build_structured_records", return_value=records),
+                    mock.patch.object(
+                        builder,
+                        "record_from_object",
+                        side_effect=lambda value: next(
+                            record for record in records if record.record_id == value["id"]
+                        ),
+                    ),
                     mock.patch.object(builder, "stable_fraction", return_value=0.0) as fraction,
                 ):
                     stats = builder.scan_candidates(
