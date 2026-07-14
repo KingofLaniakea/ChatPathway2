@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -25,6 +26,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from dataprocess.release_contract import (
+    AUDIT_SCHEMA_VERSION,
+    OVERLAP_CONTRACT,
+    PARTITIONS,
+    PRIMARY_CSV_NAMES,
+    PRIMARY_PROMPT_PROFILE,
+    RECORD_JSONL_NAMES,
+    RELEASE_SCHEMA_VERSION,
+    SOURCE_GRAPH_HASHES_NAME,
+)
+from dataprocess.prompt_profiles import (
+    NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
+    SPECIES_NEUTRAL_IDS_NO_ORGANISM,
+)
+from dataprocess.source_hashes import verify_source_graph_hashes
 from experiments._launch import controlled_training_budget_args
 from experiments.runtime_config import asset_root
 
@@ -35,6 +51,8 @@ STAGE2_IDS = (
     "exp003_stage2_sft_only_direct",
 )
 DATASET_DIRECTORY = Path("data/pathway_v3_cap256")
+EVALUATION_PARTITIONS = ("test", "test_family_only", "test_organism_only")
+CONTROLLED_MAX_LENGTH = 8192
 
 STAGE2_RESOURCES = {
     "exp002_forced_damped_hnn_reconae_joint_direct": 4,
@@ -142,6 +160,7 @@ def build_inference_jobs(
                     experiment_id,
                     seed,
                     (
+                        "--input", str(test),
                         "--shard-count", str(shard_count),
                         "--shard-index", str(shard_index),
                         "--output", str(shard_output),
@@ -194,18 +213,55 @@ def build_jobs(
     python: str,
     *,
     inference_shards: int = 4,
+    evaluation_partitions: Iterable[str] = EVALUATION_PARTITIONS,
 ) -> list[Job]:
+    evaluation_partitions = tuple(evaluation_partitions)
+    if (
+        not evaluation_partitions
+        or len(evaluation_partitions) != len(set(evaluation_partitions))
+        or not set(evaluation_partitions).issubset(EVALUATION_PARTITIONS)
+    ):
+        raise ValueError(
+            "evaluation_partitions must be distinct values from "
+            + ", ".join(EVALUATION_PARTITIONS)
+        )
     jobs: list[Job] = []
     model = root / "models/qwen3_8B"
     dataset_root = root / DATASET_DIRECTORY
-    train = dataset_root / "train_pathway_continuation_v3_cap256.csv"
-    validation = dataset_root / "validation_pathway_continuation_v3.csv"
-    test = dataset_root / "test_pathway_continuation_v3.csv"
-    record_files = {
-        "train": dataset_root / "train_pathway_records_v3.jsonl",
-        "validation": dataset_root / "validation_pathway_records_v3.jsonl",
-        "test": dataset_root / "test_pathway_records_v3.jsonl",
+    csv_files = {
+        partition: dataset_root / PRIMARY_CSV_NAMES[partition]
+        for partition in PARTITIONS
     }
+    train = csv_files["train"]
+    validation = csv_files["validation"]
+
+    def add_diagnostic_jobs(
+        *,
+        seed: int,
+        experiment_id: str,
+        key_prefix: str,
+        dependency: str,
+        run_directory: Path,
+    ) -> None:
+        for partition in evaluation_partitions:
+            partition_key = key_prefix if partition == "test" else f"{key_prefix}:{partition}"
+            partition_run_directory = (
+                run_directory
+                if partition == "test"
+                else run_directory / "diagnostics" / partition
+            )
+            jobs.extend(
+                build_inference_jobs(
+                    seed=seed,
+                    experiment_id=experiment_id,
+                    key_prefix=partition_key,
+                    dependency=dependency,
+                    test=csv_files[partition],
+                    run_directory=partition_run_directory,
+                    python=python,
+                    shard_count=inference_shards,
+                )
+            )
 
     for seed in seeds:
         seed_root = root / f"checkpoints/seeds/{seed}"
@@ -282,17 +338,12 @@ def build_jobs(
             )
         )
 
-        jobs.extend(
-            build_inference_jobs(
-                seed=seed,
-                experiment_id="exp000_sft_only_direct",
-                key_prefix=f"{seed}:exp000:infer",
-                dependency=sft_key,
-                test=test,
-                run_directory=run_root / "exp000_sft_only_direct",
-                python=python,
-                shard_count=inference_shards,
-            )
+        add_diagnostic_jobs(
+            seed=seed,
+            experiment_id="exp000_sft_only_direct",
+            key_prefix=f"{seed}:exp000:infer",
+            dependency=sft_key,
+            run_directory=run_root / "exp000_sft_only_direct",
         )
 
         for experiment_id in STAGE2_IDS:
@@ -324,23 +375,18 @@ def build_jobs(
                     ),
                 )
             )
-            jobs.extend(
-                build_inference_jobs(
-                    seed=seed,
-                    experiment_id=experiment_id,
-                    key_prefix=infer_key,
-                    dependency=train_key,
-                    test=test,
-                    run_directory=run_root / experiment_id,
-                    python=python,
-                    shard_count=inference_shards,
-                )
+            add_diagnostic_jobs(
+                seed=seed,
+                experiment_id=experiment_id,
+                key_prefix=infer_key,
+                dependency=train_key,
+                run_directory=run_root / experiment_id,
             )
     return jobs
 
 
 def select_baseline_inference_jobs(jobs: Iterable[Job]) -> list[Job]:
-    """Keep only SFT prerequisites and the four-shard exp000 evaluation."""
+    """Keep only SFT prerequisites and all requested exp000 diagnostics."""
 
     selected = [
         job
@@ -376,34 +422,49 @@ def outputs_complete(job: Job) -> bool:
 
 def validate_inputs(root: Path) -> None:
     dataset_root = root / DATASET_DIRECTORY
-    train = dataset_root / "train_pathway_continuation_v3_cap256.csv"
-    validation = dataset_root / "validation_pathway_continuation_v3.csv"
-    test = dataset_root / "test_pathway_continuation_v3.csv"
+    csv_files = {
+        partition: dataset_root / PRIMARY_CSV_NAMES[partition]
+        for partition in PARTITIONS
+    }
+    record_files = {
+        partition: dataset_root / RECORD_JSONL_NAMES[partition]
+        for partition in PARTITIONS
+    }
     manifest = dataset_root / "dataset_manifest.json"
     audit_path = dataset_root / "data_audit.json"
-    record_files = {
-        "train": dataset_root / "train_pathway_records_v3.jsonl",
-        "validation": dataset_root / "validation_pathway_records_v3.jsonl",
-        "test": dataset_root / "test_pathway_records_v3.jsonl",
-    }
+    source_graph_hashes = dataset_root / SOURCE_GRAPH_HASHES_NAME
     required = (
         root / "models/qwen3_8B/config.json",
         root / "models/qwen3_8B/chatpathway_download_manifest.json",
-        train,
-        validation,
-        test,
+        *csv_files.values(),
         manifest,
         audit_path,
+        source_graph_hashes,
         *record_files.values(),
     )
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise FileNotFoundError("missing CFFF matrix input(s):\n" + "\n".join(missing))
+    manifest_value = json.loads(manifest.read_text(encoding="utf-8"))
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    if manifest_value.get("schema_version") != RELEASE_SCHEMA_VERSION:
+        raise ValueError("dataset manifest is not the structured release v3.1 contract")
+    if audit.get("schema_version") != AUDIT_SCHEMA_VERSION:
+        raise ValueError("data audit is not the v3.1 audit contract")
+    if audit.get("release_schema_version") != RELEASE_SCHEMA_VERSION:
+        raise ValueError("data audit was generated for a different release schema")
     if audit.get("status") != "passed" or audit.get("strict_failures"):
         raise ValueError(f"dataset release audit did not pass: {audit_path}")
-    if audit_path.stat().st_mode & 0o222:
-        raise PermissionError(f"generated data audit must be read-only: {audit_path}")
+    if stat.S_IMODE(audit_path.stat().st_mode) != 0o444:
+        raise PermissionError(f"generated data audit must have mode 0444: {audit_path}")
+    if manifest_value.get("max_length") != CONTROLLED_MAX_LENGTH or audit.get("max_length") != CONTROLLED_MAX_LENGTH:
+        raise ValueError("v3.1 release and audit must enforce max_length=8192")
+    if manifest_value.get("primary_prompt_profile") != PRIMARY_PROMPT_PROFILE:
+        raise ValueError("matrix requires the explicit-organism source-native primary profile")
+    if set(manifest_value.get("splits", {})) != set(PARTITIONS):
+        raise ValueError("dataset manifest must declare exactly five primary partitions")
+    if set(audit.get("splits", {})) != set(PARTITIONS):
+        raise ValueError("data audit must cover exactly five primary partitions")
 
     def sha256(path: Path) -> str:
         digest = hashlib.sha256()
@@ -414,15 +475,136 @@ def validate_inputs(root: Path) -> None:
 
     if sha256(manifest) != audit.get("manifest_sha256"):
         raise ValueError("dataset manifest changed after data_audit.json was generated")
-    for split, path in (("train", train), ("validation", validation), ("test", test)):
-        expected = audit.get("splits", {}).get(split, {}).get("sha256")
+    for split in PARTITIONS:
+        path = csv_files[split]
+        split_manifest = manifest_value["splits"][split]
+        split_audit = audit["splits"][split]
+        if split_manifest.get("prompt_profile") != PRIMARY_PROMPT_PROFILE:
+            raise ValueError(f"{split} manifest does not use the primary prompt profile")
+        if split_manifest.get("prompt_profile_interface_applied") is not True:
+            raise ValueError(f"{split} did not apply the prompt profile interface")
+        if split_manifest.get("prefix_horizon_interface_applied") is not True:
+            raise ValueError(f"{split} did not apply the prefix-horizon interface")
+        if split_audit.get("errors"):
+            raise ValueError(f"{split} has strict audit errors")
+        rows = split_audit.get("rows")
+        if not isinstance(rows, int) or rows < 1:
+            raise ValueError(f"{split} must contain at least one accepted row")
+        if split_audit.get("prompt_profiles") != {PRIMARY_PROMPT_PROFILE: rows}:
+            raise ValueError(f"{split} contains a non-primary or unaudited prompt profile")
+        truncation = split_audit.get("truncation_estimate", {})
+        if (
+            truncation.get("max_length") != CONTROLLED_MAX_LENGTH
+            or truncation.get("accepted_rows_over_budget") != 0
+        ):
+            raise ValueError(f"{split} violates the strict 8192-token release budget")
+        expected = split_audit.get("sha256")
         if not expected or sha256(path) != expected:
             raise ValueError(f"{split} CSV changed after data_audit.json was generated")
+        if split_manifest.get("csv_sha256") != expected:
+            raise ValueError(f"{split} CSV hash disagrees between manifest and audit")
         record_expected = (
-            audit.get("splits", {}).get(split, {}).get("record_jsonl", {}).get("sha256")
+            split_audit.get("record_jsonl", {}).get("sha256")
         )
         if not record_expected or sha256(record_files[split]) != record_expected:
             raise ValueError(f"{split} record JSONL changed after data_audit.json was generated")
+        if split_manifest.get("records_sha256") != record_expected:
+            raise ValueError(f"{split} record JSONL hash disagrees between manifest and audit")
+
+    source_hash_report = audit.get("source_graph_hashes", {})
+    if source_hash_report.get("status") != "passed" or source_hash_report.get("errors"):
+        raise ValueError("source graph content-hash verification did not pass")
+    if sha256(source_graph_hashes) != source_hash_report.get("sha256"):
+        raise ValueError("source_graph_hashes.jsonl changed after the release audit")
+    manifest_source_hashes = manifest_value.get("source_graph_hashes", {})
+    if manifest_source_hashes.get("sha256") != source_hash_report.get("sha256"):
+        raise ValueError("source graph inventory hash disagrees between manifest and audit")
+    graph_root_value = manifest_value.get("processed_graph_root")
+    if not graph_root_value:
+        raise ValueError("dataset manifest does not declare processed_graph_root")
+    graph_root = Path(str(graph_root_value))
+    if not graph_root.is_dir():
+        raise FileNotFoundError(graph_root)
+    live_source_report = verify_source_graph_hashes(graph_root, source_graph_hashes)
+    if live_source_report.get("errors"):
+        raise ValueError("live source graph content hashes no longer match the release")
+    if (
+        live_source_report.get("sha256") != source_hash_report.get("sha256")
+        or live_source_report.get("records") != source_hash_report.get("records")
+    ):
+        raise ValueError("live source graph hash inventory disagrees with data_audit.json")
+
+    strict_overlap = audit.get("required_summary", {}).get("strict_overlap", {})
+    for (left, right), contract in OVERLAP_CONTRACT.items():
+        pair = f"{left}_vs_{right}"
+        report = strict_overlap.get(pair, {})
+        identity = report.get("identity_contract", {})
+        if not identity or any(result.get("passed") is not True for result in identity.values()):
+            raise ValueError(f"{pair} identity overlap contract did not pass")
+        biological = report.get("biological_contract", {})
+        for field, policy in contract.items():
+            result = biological.get(field, {})
+            if result.get("policy") != policy or result.get("passed") is not True:
+                raise ValueError(f"{pair} {field} overlap contract did not pass")
+
+    paired_manifest = manifest_value.get("paired_prompt_profiles", {})
+    paired_files = paired_manifest.get("files", {})
+    expected_controls = (
+        NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
+        SPECIES_NEUTRAL_IDS_NO_ORGANISM,
+    )
+    if (
+        paired_manifest.get("status") != "published"
+        or paired_manifest.get("published") is not True
+        or set(paired_files) != set(expected_controls)
+    ):
+        raise ValueError("v3.1 release must publish canonical P1 and strict-natural P2 controls")
+    paired_audit = audit.get("paired_prompt_profiles", {})
+    if (
+        paired_audit.get("status") != "passed"
+        or paired_audit.get("manifest_published") is not True
+        or paired_audit.get("canonical_files_match_prompt_controls") is not True
+    ):
+        raise ValueError("paired prompt-profile audit did not pass")
+    reports = paired_audit.get("declared_file_reports", {})
+    checks = paired_audit.get("pair_checks", {})
+    for profile in expected_controls:
+        partition_files = paired_files.get(profile, {})
+        if set(partition_files) != set(PARTITIONS):
+            raise ValueError(f"{profile} must publish all five primary partitions")
+        for partition in PARTITIONS:
+            metadata = partition_files[partition]
+            if not isinstance(metadata, dict) or not metadata.get("path"):
+                raise ValueError(f"{profile}:{partition} has no canonical file metadata")
+            control_path = dataset_root / str(metadata["path"])
+            if not control_path.is_file():
+                raise FileNotFoundError(control_path)
+            expected_hash = metadata.get("sha256") or metadata.get("csv_sha256")
+            report = reports.get(f"{profile}:{partition}", {})
+            actual_hash = sha256(control_path)
+            if not expected_hash or actual_hash != expected_hash or report.get("sha256") != actual_hash:
+                raise ValueError(f"{profile}:{partition} control CSV hash verification failed")
+            if report.get("errors") or not isinstance(report.get("rows"), int) or report["rows"] < 1:
+                raise ValueError(f"{profile}:{partition} control CSV did not pass row auditing")
+
+    for partition in PARTITIONS:
+        p1_key = (
+            f"{partition}:{PRIMARY_PROMPT_PROFILE}_vs_"
+            f"{NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS}"
+        )
+        p2_key = (
+            f"{partition}:{PRIMARY_PROMPT_PROFILE}_vs_"
+            f"{SPECIES_NEUTRAL_IDS_NO_ORGANISM}"
+        )
+        p1 = checks.get(p1_key, {})
+        p2 = checks.get(p2_key, {})
+        if p1.get("passed") is not True or p1.get("base_sample_policy") != "exact_primary_set":
+            raise ValueError(f"{partition} P0/P1 exact pairing contract did not pass")
+        if (
+            p2.get("passed") is not True
+            or p2.get("base_sample_policy") != "strict_natural_neutral_subset"
+        ):
+            raise ValueError(f"{partition} P2 strict-natural subset contract did not pass")
 
 
 def run_scheduler(
@@ -545,6 +727,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default="cfff")
     parser.add_argument("--inference-shards", type=int, default=4)
     parser.add_argument(
+        "--evaluation-partitions",
+        type=parse_csv_strings,
+        default=list(EVALUATION_PARTITIONS),
+        help="Comma-separated diagnostic test partitions to schedule.",
+    )
+    parser.add_argument(
         "--only-baseline-inference",
         action="store_true",
         help="Run only completed/shared SFT prerequisites and exp000 inference shards/merge.",
@@ -558,6 +746,11 @@ def parse_args() -> argparse.Namespace:
         parser.error("--poll-seconds must be positive")
     if not 1 <= args.inference_shards <= 4:
         parser.error("--inference-shards must be between 1 and 4")
+    if not set(args.evaluation_partitions).issubset(EVALUATION_PARTITIONS):
+        parser.error(
+            "--evaluation-partitions must contain only "
+            + ", ".join(EVALUATION_PARTITIONS)
+        )
     return args
 
 
@@ -571,6 +764,7 @@ def main() -> None:
         root,
         sys.executable,
         inference_shards=args.inference_shards,
+        evaluation_partitions=args.evaluation_partitions,
     )
     if args.only_baseline_inference:
         jobs = select_baseline_inference_jobs(jobs)

@@ -148,6 +148,9 @@
 
 - [ ] graph-layer JSON boundary controller。
 - [ ] v3 canonical event-resolution dynamics。
+- [ ] 实现 D3：固定 SFT+AE 预训练 HNN/FDHNN 1--3 轮并通过 validation 稳定判据，再以
+  LoRA `5e-6`/`1e-5`、dynamics `2e-4` 联合训练；加入动力学到 LoRA 的权重 warmup、
+  stage-1 SFT 输出 KL、LoRA 梯度夹角日志和三类 validation-best checkpoint。
 - [ ] 独立 token-resolution dynamics。
 - [ ] 前述 controller 通过后的 multiscale hybrid。
 - [ ] AE 表示、frozen teacher target、latent dimension/geometry 消融。

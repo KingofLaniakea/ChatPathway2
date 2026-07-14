@@ -316,18 +316,42 @@ def main() -> None:
 
     prepare_structured = sub.add_parser(
         "prepare-structured-data",
-        help="Build and strictly audit the canonical processed_graph pathway-continuation v3 release.",
+        help="Build and strictly audit the five-partition pathway-continuation v3.1 release.",
     )
     prepare_structured.add_argument("--processed-graph-root")
+    prepare_structured.add_argument(
+        "--processed-root",
+        help="Matching processed-text root, used only for source-path coverage auditing.",
+    )
     prepare_structured.add_argument("--output-dir")
-    prepare_structured.add_argument("--max-length", type=int, default=8192)
+    prepare_structured.add_argument("--max-length", type=int, choices=(8192,), default=8192)
     prepare_structured.add_argument("--test-organisms", default="tru,xtr,dre,gga,dmk,dme,cel")
     prepare_structured.add_argument("--test-family-fraction", type=float, default=0.05)
     prepare_structured.add_argument("--validation-family-fraction", type=float, default=0.05)
     prepare_structured.add_argument("--train-candidate-record-fraction", type=float, default=0.003)
+    prepare_structured.add_argument("--evaluation-candidate-record-fraction", type=float, default=1.0)
+    prepare_structured.add_argument(
+        "--seen-evaluation-candidate-record-fraction", type=float, default=0.02
+    )
     prepare_structured.add_argument("--max-records-per-family", type=int, default=256)
+    prepare_structured.add_argument("--maximum-train-records", type=int, default=18000)
+    prepare_structured.add_argument(
+        "--target-train-input-tokens-per-epoch", type=int, default=36000000
+    )
     prepare_structured.add_argument("--max-prefixes-per-train-record", type=int, default=3)
     prepare_structured.add_argument("--minimum-train-records", type=int, default=12000)
+    prepare_structured.add_argument("--coverage-graphs-per-train-organism", type=int, default=1)
+    prepare_structured.add_argument(
+        "--reference-input-tokens-per-second", type=float, default=2418.9274035045514
+    )
+    prepare_structured.add_argument("--planned-max-sft-epochs", type=int, default=12)
+    prepare_structured.add_argument(
+        "--reference-validation-train-time-ratio", type=float, default=0.2170806685965555
+    )
+    prepare_structured.add_argument("--maximum-estimated-sft-hours", type=float, default=72.0)
+    prepare_structured.add_argument("--workers", type=int, default=0)
+    prepare_structured.add_argument("--worker-batch-size", type=int, default=128)
+    prepare_structured.add_argument("--max-files", type=int, default=0)
     prepare_structured.add_argument("--seed", type=int, default=20260711)
     prepare_structured.add_argument("--progress-every", type=int, default=1000)
     prepare_structured.add_argument("--overwrite", action="store_true")
@@ -555,6 +579,8 @@ def main() -> None:
             "dataprocess.build_structured_dataset",
             "--processed-graph-root",
             args.processed_graph_root or asset_path("KEGG_all_new/processed_graph"),
+            "--processed-root",
+            args.processed_root or asset_path("KEGG_all_new/processed"),
             "--output-dir",
             args.output_dir
             or asset_path(f"data/pathway_v3_cap{args.max_records_per_family}"),
@@ -570,12 +596,36 @@ def main() -> None:
             str(args.validation_family_fraction),
             "--train-candidate-record-fraction",
             str(args.train_candidate_record_fraction),
+            "--evaluation-candidate-record-fraction",
+            str(args.evaluation_candidate_record_fraction),
+            "--seen-evaluation-candidate-record-fraction",
+            str(args.seen_evaluation_candidate_record_fraction),
             "--max-records-per-family",
             str(args.max_records_per_family),
+            "--maximum-train-records",
+            str(args.maximum_train_records),
+            "--target-train-input-tokens-per-epoch",
+            str(args.target_train_input_tokens_per_epoch),
             "--max-prefixes-per-train-record",
             str(args.max_prefixes_per_train_record),
             "--minimum-train-records",
             str(args.minimum_train_records),
+            "--coverage-graphs-per-train-organism",
+            str(args.coverage_graphs_per_train_organism),
+            "--reference-input-tokens-per-second",
+            str(args.reference_input_tokens_per_second),
+            "--planned-max-sft-epochs",
+            str(args.planned_max_sft_epochs),
+            "--reference-validation-train-time-ratio",
+            str(args.reference_validation_train_time_ratio),
+            "--maximum-estimated-sft-hours",
+            str(args.maximum_estimated_sft_hours),
+            "--workers",
+            str(args.workers),
+            "--worker-batch-size",
+            str(args.worker_batch_size),
+            "--max-files",
+            str(args.max_files),
             "--seed",
             str(args.seed),
             "--progress-every",

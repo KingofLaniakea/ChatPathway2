@@ -21,13 +21,22 @@ class MergePathwayShardsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "input.csv"
-            source_fields = ["sample_id", "question", "answer", "pathway_family_id"]
+            source_fields = [
+                "sample_id",
+                "base_sample_id",
+                "question",
+                "answer",
+                "pathway_family_id",
+                "prompt_profile",
+            ]
             source_rows = [
                 {
                     "sample_id": f"s{index}",
+                    "base_sample_id": f"base{index}",
                     "question": f"q{index}",
                     "answer": f"a{index}",
                     "pathway_family_id": "00051",
+                    "prompt_profile": "explicit_organism_source_native_ids",
                 }
                 for index in range(5)
             ]
@@ -70,9 +79,11 @@ class MergePathwayShardsTests(unittest.TestCase):
                             {
                                 "sample_index": index,
                                 "sample_id": source_rows[index]["sample_id"],
+                                "base_sample_id": source_rows[index]["base_sample_id"],
                                 "record_id": "",
                                 "organism": "",
                                 "pathway_family_id": source_rows[index]["pathway_family_id"],
+                                "prompt_profile": source_rows[index]["prompt_profile"],
                                 "gold_answer": source_rows[index]["answer"],
                                 "predicted_answer": f"p{index}",
                                 "generated_token_count": 10 + index,

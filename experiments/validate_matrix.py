@@ -7,6 +7,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dataprocess.release_contract import (
+    AUDIT_SCHEMA_VERSION,
+    PRIMARY_CSV_NAMES,
+    PRIMARY_PROMPT_PROFILE,
+    RECORD_JSONL_NAMES,
+    RELEASE_SCHEMA_VERSION,
+    SOURCE_GRAPH_HASHES_NAME,
+)
 
 MATRIX_PATH = Path(__file__).with_name("matrix.json")
 RUNTIME_MANIFEST_PATH = Path(__file__).with_name("runtime_manifest.json")
@@ -27,6 +35,53 @@ POST_CURRENT_GENERATION_IDS = {
     "plan012_token_resolution_stepwise",
     "plan013_multiscale_hybrid_generation",
 }
+EXPECTED_DIAGNOSTIC_PARTITIONS = ("test", "test_family_only", "test_organism_only")
+
+
+def validate_dataset_profile(matrix: dict[str, Any]) -> list[str]:
+    """Keep the human-readable matrix aligned with the enforced v3.1 release."""
+
+    errors: list[str] = []
+    profile = matrix.get("dataset_profile", {})
+    expected_root = "data/pathway_v3_cap256"
+    expected_paths = {
+        "train": f"{expected_root}/{PRIMARY_CSV_NAMES['train']}",
+        "validation": f"{expected_root}/{PRIMARY_CSV_NAMES['validation']}",
+    }
+    for name, expected in expected_paths.items():
+        if profile.get(name) != expected:
+            errors.append(f"dataset_profile.{name} must be {expected!r}")
+    diagnostics = profile.get("diagnostic_tests", {})
+    if set(diagnostics) != set(EXPECTED_DIAGNOSTIC_PARTITIONS):
+        errors.append("dataset_profile.diagnostic_tests must declare all three test partitions")
+    else:
+        for partition in EXPECTED_DIAGNOSTIC_PARTITIONS:
+            expected = f"{expected_root}/{PRIMARY_CSV_NAMES[partition]}"
+            if not str(diagnostics[partition]).startswith(expected):
+                errors.append(
+                    f"dataset_profile.diagnostic_tests.{partition} must start with {expected!r}"
+                )
+    records = profile.get("record_jsonl", {})
+    expected_records = {
+        partition: f"{expected_root}/{filename}"
+        for partition, filename in RECORD_JSONL_NAMES.items()
+    }
+    if records != expected_records:
+        errors.append("dataset_profile.record_jsonl does not match the five v3.1 record files")
+    checks = {
+        "release_schema": RELEASE_SCHEMA_VERSION,
+        "audit_schema": AUDIT_SCHEMA_VERSION,
+        "primary_prompt_profile": PRIMARY_PROMPT_PROFILE,
+        "release_manifest": f"{expected_root}/dataset_manifest.json",
+        "immutable_audit": f"{expected_root}/data_audit.json",
+        "source_graph_hashes": f"{expected_root}/{SOURCE_GRAPH_HASHES_NAME}",
+    }
+    for field, expected in checks.items():
+        if profile.get(field) != expected:
+            errors.append(f"dataset_profile.{field} must be {expected!r}")
+    if matrix.get("sequence_budget", {}).get("max_length") != 8192:
+        errors.append("sequence_budget.max_length must remain 8192 for release v3.1")
+    return errors
 
 
 def module_to_file(module: str) -> Path:
@@ -162,6 +217,7 @@ def main() -> None:
         seen.add(experiment_id)
         errors.extend(validate_row(row))
     errors.extend(validate_runtime_manifest(seen))
+    errors.extend(validate_dataset_profile(matrix))
     errors.extend(validate_research_plan(matrix))
 
     if errors:

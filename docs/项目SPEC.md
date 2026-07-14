@@ -50,34 +50,35 @@ KEGG KGML 与 support files
 
 ### 2.2 canonical graph
 
-**当前事实**：`processed_graph` 保存 pathway metadata、node、relation、reaction，以及源 KGML 真实存在时的 phenotype edge。node 具有 entry/node ID、类型、canonical ID、display name、alias 和解析状态；event 具有端点、方向、subtype 和可渲染状态。
+**当前事实**：`processed_graph` 已在 CFFF 恢复并校验为 1,368,605 个 JSON、10,859 个顶层目录。它保存 pathway metadata、node、relation 和 reaction；`processed` 只用于历史文本/路径对账，不再作为 relation/reaction truth。node 具有 entry/node ID、类型、canonical ID、display name、alias 和解析状态；event 具有端点、subtype 和可渲染状态。
 
-**目标 v3** 要保证：
+**v3 已实现**：
 
-- `graph_id` 与源 KGML 内容绑定；
-- relation、reaction、phenotype 分别有不变 `event_id`，文本不充当身份；
+- `graph_id` 与相对 source graph 路径及 `processed_graph` 内容 hash 绑定；
+- relation、reaction 分别有稳定 `event_id`，文本不充当身份；
 - raw token、canonical name、aliases 和 unresolved reason 全部保留；
 - group/component 不在展开后丢失；
-- 每个 event 能追回源 XML element 或稳定 source reference。
+- 每个 event 能追回 source graph、原始端点、subtype/reaction 字段和解析状态。
+
+关系方向采用 fail-closed 规则：`activation`、`inhibition`、`expression`、`repression`、`indirect effect` 才把 KGML `entry1 -> entry2` 放入 backbone；binding/association、dissociation、state change、修饰和 compound mediator 只作 context，不制造先后顺序；`missing interaction` 与未知扩展不进入核心拓扑。reaction 只从 `processed_graph.reactions` 产生，固定标记为 `irreversible_conversion` 或 `reversible_conversion`；可逆反应只在拓扑中投影双向弧，模型目标仍保留为一个 reaction event。任何坏端点或三份 subtype 信息不一致都会排除整张 graph，绝不删掉坏边后重新计算 SCC。
 
 ### 2.3 sink view、SCC 与 layer 的真正含义
 
-`processed` 中的一个 `pathway N` 是一个 sink-rooted view。管线先对有环图做 SCC 压缩，再按到 sink 的拓扑距离形成 layer。因此：
+v3 直接从 `processed_graph` 的严格 backbone 构造 sink-rooted view。管线先对有环图做 SCC 压缩，再用 condensation DAG 上到 sink 的**最长拓扑距离**形成 layer；context 只能附着到 backbone 已确定的 view，不能扩张 view。因此：
 
 - 不同 layer 提供上游到下游的**序数坐标**；
 - layer 不是秒、分钟或小时，层间也没有可观测的不等时间差；
 - 同一 layer 内的 event 是并行集合，序列化顺序仅用于重现；
 - 同一 canonical event 可被多个 sink view 引用，它们不是多个独立实验观测。
 
-**当前缺陷**：Step 12 在内存中已为 event 构建过带 `unit_id`、event type、source/target node IDs 和 text 的 `text_unit`，但写盘时按文本去重并拼成了每层一个 paragraph。现有 `processed` 的 layer 虽是 list，实际通常只有一个拼接字符串。因此 `sentence_parser_v1` 只能被称为句子边界恢复，不能被宣称为 canonical 生物 event。
+**历史 v2 缺陷**：Step 12 在内存中已为 event 构建过带 `unit_id`、event type、source/target node IDs 和 text 的 `text_unit`，但写盘时按文本去重并拼成了每层一个 paragraph。现有 `processed` 的 layer 虽是 list，实际通常只有一个拼接字符串。因此 `sentence_parser_v1` 只能被称为句子边界恢复，不能被宣称为 canonical 生物 event。
 
 还有两个结构风险：
 
 1. 两条不同 canonical edge 渲染成同一句话时，按文本去重会静默丢 event；
 2. 如果只用 `renderable=true` event 构建 SCC，“无法渲染英文”会被错当成“这条边不存在”，从而制造伪 sink、伪断连和错误 layer。
 
-**目标 v3** 应先用所有 canonical structural event 构图，再把可渲染性作为文本层状态，
-并写出如下的结构化引用：
+**v3 已实现**：只有有明确方向证据的 event 构造 backbone；方向不明的 canonical event 保留为 context/excluded provenance；`renderable` 只是 producer 文本状态，不决定边是否存在。记录写出如下结构化引用：
 
 ```json
 {
@@ -95,7 +96,8 @@ KEGG KGML 与 support files
           "source_node_ids": [2],
           "target_node_ids": [8],
           "text": "A activates B.",
-          "renderable": true
+          "producer_renderable": true,
+          "topology_role": "backbone"
         }
       ]
     }
@@ -103,7 +105,7 @@ KEGG KGML 与 support files
 }
 ```
 
-`view_id` 应由排序后的 canonical sink node IDs 计算，不再依赖可能随 producer 变化的`pathway N`。
+`view_id` 由 graph ID 与排序后的 canonical sink node IDs 计算，不再依赖可能随 producer 变化的 `pathway N`。
 
 ## 3. 从 graph/view 到模型数据集
 
@@ -116,7 +118,8 @@ KEGG KGML 与 support files
 | graph | 一个 KGML pathway graph | `graph_id`，保存 canonical node/event |
 | view | 一个 sink-rooted trajectory | 稳定 `view_id`，保存 ordered layers 和 same-layer event sets |
 | record | 一个可等权采样的 biological record | `record_id = hash(graph_id, view_id)` |
-| sample | record 在某一 prefix/horizon 下的监督问题 | `sample_id`，由 record、prefix、horizon 和 schema version 唯一确定 |
+| base sample | record 在某一 prefix/horizon 下的监督问题 | `base_sample_id = record_id:prefix=<n>` |
+| profile sample | base sample 的一种物种条件提示 | `sample_id = base_sample_id:profile=<profile>` |
 
 **当前 v2** 已用 organism、`source_json`、pathway ID 和 pathway block 的 hash 补上稳定`record_id`，并使用 `record_id:prefix=<n>` 作为 `sample_id`。旧 `entry_id=0/1/...`只是文件内 block 编号，绝不是全局身份。推理产物必须原样保留所有 identity/source字段，包括以字符串保留 `pathway_family_id` 的前导零。
 
@@ -133,15 +136,17 @@ KEGG KGML 与 support files
 
 ### 3.3 split 是实验声明的一部分
 
-至少固化三种不同的 evaluation profile：
+数据发布同时固化五个分区：
 
-1. **strict pathway-family split**：organism 与 KEGG 五位 map family 均不跨 train/test；
-2. **graph-cluster split（目标 v3）**：基于 KO set、边类型和子图相似度聚类，整个近同源component 只进入一个 split；
-3. **organism transfer**：只 hold out species，允许 family overlap，并显式报告 overlap，不得冒充 unseen-pathway 分数。
+1. `train`：已见物种、训练 family；
+2. `validation`：已见物种、独立 validation family；
+3. `test`：预留物种、strict family，物种与 family 同时留出；
+4. `test_family_only`：已见物种、与 `test` 完全相同的 strict family；
+5. `test_organism_only`：预留物种、与 train 有交集的 family。
 
 五位 family disjoint 是必要而非充分条件：不同 map ID 仍可共享大量 KO 或近同构子图。每个 split manifest 必须保存阈值、seed、cluster membership、输入 inventory hash 和 overlap audit。validation 从训练候选 family/cluster 中整组留出，checkpoint 选择和早停只看 validation，test 不参与选择。
 
-**v3 当前实现**采用第 1 种 profile：test 同时限定为预留物种和预留 family，train 排除这些物种与 family；validation 再预留另一组完整 family。graph-cluster split 仍未实现，因此 v3 的严格声明是“物种与五位 KEGG family 均不重叠”，不是“无所有同源子图泄漏”。
+这五个分区之间的 source graph、graph、view、record 和 base sample 必须全部零重叠；`test` 与 `test_family_only` 的 family 集合必须相等，`test` 与 `test_organism_only` 的 organism 集合必须相等。graph-cluster split 仍未实现，因此 v3 的严格声明是“指定分区间物种与/或五位 KEGG family 不重叠”，不是“无所有同源子图泄漏”。
 
 ### 3.4 phenotype 政策
 
@@ -172,7 +177,7 @@ KEGG KGML 与 support files
 
 - 保留实体 alias、canonical name 与 unresolved token；
 - 让每个自然语言 event 能追回 source/target endpoint；
-- pathway 名称、类别、物种可保留为 provenance，但核心续写 prompt 不再显式提供，避免检索捷径；
+- pathway 名称、类别、ID、title、block 只保留为 provenance；物种在主条件中显式提供，因为实际应用已知物种且同一上游关系在不同物种可有不同下游；
 - 保存 graph traversal/evidence trace，而不是只留最终段落。
 
 早期 `006_step3_design_prompt.py` 的 prompt 只包含领域角色、pathway 名称/类别/物种和“初始反应物”，answer 是将 layer 句子逐行拼接的平面文本；它没有 JSON schema、稳定 ID、边界 provenance 或 split contract。更重要的是，其中“cells are exposed to initial reactants”并没有 KGML实验干预依据，不应再使用这种因果措辞。正确任务是：给定 observed upstream graph events，续写 downstream graph continuation。
@@ -207,11 +212,17 @@ KEGG KGML 与 support files
 
 - dataset build/split 由 manifest 与文件固定；CSV 保存 `question_type`、record/sample identity，answer 内保存 `schema_version`；
 - observed layer 和 same-layer event-set 边界；
-- prompt 中的紧凑目标 JSON 骨架；当前尚未实现 constrained decoding；
+- prompt 中的完整、可直接解析的目标 JSON 格式示例；当前尚未实现 constrained decoding；
 - canonical record 中的完整 `event_id`、source/target node、relation/reaction ID 和 boundary provenance；
 - CSV 中的 prefix/target layer 数；选择政策与逐 split token 分布由 manifest 和生成审计固定。
 
-核心 prompt 只包含任务说明、紧凑 JSON 骨架与 observed structured events，不显式加入 pathway 名称、类别、ID、title、block、物种或 phenotype。核心 answer 只输出 downstream continuation，不包含恒定 `predicted_phenotype:null`。同一 layer 内 events 是 permutation-invariant set；若将它们排序，只能说是确定性 serialization，不能说是生物时间。
+核心 prompt 包含任务说明、**完整可解析的目标 JSON 格式示例**、已知 KEGG organism code 与 observed structured events；不显式加入 pathway 名称、类别、ID、title、block 或 phenotype。提示词不再加入“同层 event 无序”这句额外说明；数据/评估内部仍禁止把确定性 serialization 解释成同层生物时间。核心 answer 只输出 downstream continuation，不包含恒定 `predicted_phenotype:null`。
+
+物种条件有三个严格命名的 profile：
+
+1. `explicit_organism_source_native_ids`（P0，主训练/主评测）：显式显示 organism，保留源生物 ID；
+2. `no_explicit_organism_source_native_ids`（P1）：不显示 organism 名称，但原生 `hsa:`/`mmu:` 等 ID 仍可能泄露物种，因此只能称“无显式物种名称对照”；P0/P1 必须具有完全相同的 `base_sample_id` 与 answer；
+3. `species_neutral_ids_no_organism`（P2）：不显示 organism，且完整输入/目标天然只含 KO、compound、glycan、reaction、EC 等物种中立 ID。P2 是 P0 的严格可审计子集；不允许删除物种前缀冒充映射，也不允许伪造 KO。
 
 推荐的 model-visible 骨架是：
 
@@ -224,7 +235,7 @@ KEGG KGML 与 support files
       "events": [
         {
           "source": [{"canonical_id": "hsa:207", "name": "AKT1"}],
-          "relation": "phosphorylates",
+          "relation": "activation",
           "target": [{"canonical_id": "hsa:572", "name": "BAD"}],
           "text": "AKT1 phosphorylates BAD."
         }
@@ -239,11 +250,11 @@ canonical record JSONL 另行保存这些目标对应的 `event_id`、node ID、
 
 SFT 中 system/user token 全部 mask，assistant answer 默认全监督。只有在训练和推理都始终使用 schema-constrained decoding 时，才可将恒定 JSON key 作为一个明确对照轴降权；step/layer/event 的值不能 mask。
 
-物化器用真实 Qwen tokenizer 计算完整 chat prompt、完整 answer 与结束 token。总长超过 8192 的 row 在写入训练集前整条排除；训练编码器再次检查，任何漏网 row 直接报错，绝不在 JSON token 中间截断。推理第一次输出不闭合或不符合 v3 schema 时，加入明确 repair turn 并扩大生成预算；第三次仍失败就记录完整 attempt history 并报错。
+物化器用真实 Qwen tokenizer 计算完整 chat prompt、完整 answer 与结束 token。总长超过 8192 的 row 在写入训练集前整条排除；训练编码器再次检查，任何漏网 row 直接报错，绝不在 JSON token 中间截断。推理第一次输出不闭合或不符合 v3 schema 时，加入明确 repair turn 并扩大生成预算；最多三次，第三次仍失败就记录完整 attempt history 并报错。
 
-默认发布目录为 `data/pathway_v3_cap256/`：family cap 为 256，每个 train record 最多物化三个 prefix，低于 12,000 个可训练 record 就拒绝发布。该门槛是为了避免再次得到只够很短训练的表；最终训练时长只能由第一轮 v3 实测 token throughput 确认。
+默认发布目录为 `data/pathway_v3_cap256/`：family cap 为 256；候选先保证每个可用训练物种至少检查一个 train-assigned graph，再按物种轮转补更多记录；每个 train record 最多物化三个 prefix，但每个 epoch 只选一个。低于 12,000 个或高于 18,000 个可训练 record 都拒绝发布，且每轮估计输入上限为 3,600 万 token。按 CFFF 四张 A100 上 cap32 计时作业实测的 2,418.93 input token/s、validation/train 时间比 0.217 和最多 12 轮估计，目标中心约 60 小时；估计超过 72 小时拒绝发布。第一轮 v3 训练日志必须用真实吞吐替换此估计。
 
-发布时程序生成只读 `data_audit.json`，至少包含 train/validation/test 的 row、record、source JSON 与 family 数；source/record/sample/family strict overlap；organism overlap；重复 ID；phenotype/parser 状态；structured event 覆盖；layer/token 长度分布；超长排除率；graph artifact coverage。CFFF 调度器在分配 GPU 前复核 audit pass 状态、只读权限、manifest hash、三个 CSV 和三个 record JSONL hash。
+发布时程序生成只读 `0444 data_audit.json`，覆盖五个分区的 row、record、source graph、family 和逐物种分布；source/graph/view/record/base-sample overlap；organism/family 诊断合同；重复 ID；phenotype/parser 状态；structured event、layer/token 长度、超长排除、processed 对账和 graph artifact coverage；全部 CSV/JSONL/manifest/source graph inventory hash；P0/P1 精确配对与 P2 天然中立子集。CFFF 调度器在分配 GPU 前现场重算这些 hash 并复核审计状态与只读权限。
 
 ## 5. 训练管线
 

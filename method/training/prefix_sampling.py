@@ -25,6 +25,18 @@ PREFIX_POLICIES: dict[str, tuple[str, ...]] = {
     "balanced_cycle": ("long", "middle", "short"),
 }
 
+PREFIX_HORIZON_VALUES = (
+    "long_target",
+    "middle_target",
+    "short_target",
+    "degenerate_target",
+)
+_SCHEDULE_TO_HORIZON = {
+    "long": "long_target",
+    "middle": "middle_target",
+    "short": "short_target",
+}
+
 
 def _stable_offset(seed: int, record_id: str, modulus: int) -> int:
     digest = hashlib.sha256(f"{seed}:{record_id}".encode("utf-8")).digest()
@@ -54,6 +66,7 @@ class EpochPrefixView:
         seed: int,
         record_column: str = "record_id",
         prefix_column: str = "prefix_step_count",
+        horizon_column: str = "prefix_horizon",
     ) -> None:
         if sampling_mode not in PREFIX_SAMPLING_MODES:
             raise ValueError(
@@ -73,6 +86,7 @@ class EpochPrefixView:
         self.seed = int(seed)
         self.record_column = record_column
         self.prefix_column = prefix_column
+        self.horizon_column = horizon_column
         self.epoch = 1
 
         if sampling_mode == "all_rows":
@@ -91,6 +105,7 @@ class EpochPrefixView:
 
         self._record_ids = list(grouped)
         groups: list[tuple[int, ...]] = []
+        horizons: list[dict[str, int]] = []
         for record_id in self._record_ids:
             indices = sorted(
                 grouped[record_id],
@@ -107,7 +122,27 @@ class EpochPrefixView:
                     f"record {record_id!r} has duplicate {prefix_column} values"
                 )
             groups.append(tuple(indices))
+            explicit_horizons: dict[str, int] = {}
+            for row_index in indices:
+                raw_horizon = str(self.rows[row_index].get(horizon_column, "")).strip()
+                if not raw_horizon:
+                    continue
+                if raw_horizon not in PREFIX_HORIZON_VALUES:
+                    raise ValueError(
+                        f"record {record_id!r} has invalid {horizon_column}={raw_horizon!r}"
+                    )
+                if raw_horizon in explicit_horizons:
+                    raise ValueError(
+                        f"record {record_id!r} has duplicate {horizon_column}={raw_horizon!r}"
+                    )
+                explicit_horizons[raw_horizon] = row_index
+            if explicit_horizons and len(explicit_horizons) != len(indices):
+                raise ValueError(
+                    f"record {record_id!r} mixes explicit and missing {horizon_column} values"
+                )
+            horizons.append(explicit_horizons)
         self._groups = groups
+        self._horizons = horizons
 
     def __len__(self) -> int:
         return len(self._groups)
@@ -136,6 +171,12 @@ class EpochPrefixView:
         schedule = PREFIX_POLICIES[self.policy]
         offset = _stable_offset(self.seed, record_id, len(schedule))
         horizon = schedule[(self.epoch - 1 + offset) % len(schedule)]
+        explicit_horizons = self._horizons[index]
+        if explicit_horizons:
+            requested = _SCHEDULE_TO_HORIZON[horizon]
+            selected = explicit_horizons.get(requested)
+            if selected is not None:
+                return selected, horizon
         positions = {
             "long": 0,
             "middle": (len(group) - 1) // 2,
@@ -160,6 +201,7 @@ class EpochPrefixView:
 
 __all__ = [
     "EpochPrefixView",
+    "PREFIX_HORIZON_VALUES",
     "PREFIX_POLICIES",
     "PREFIX_SAMPLING_MODES",
 ]

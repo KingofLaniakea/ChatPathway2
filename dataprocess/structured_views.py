@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import replace
 from typing import Any, Iterable
 
 from dataprocess.structured_schema import (
     StructuredEvent,
     StructuredLayer,
     StructuredRecord,
+    TOPOLOGY_BACKBONE,
+    TOPOLOGY_CONTEXT,
+    TOPOLOGY_CONTEXT_CROSS_LAYER,
+    TOPOLOGY_EXCLUDED,
     graph_events,
     normalized_pathway_id,
     stable_id,
@@ -82,12 +87,12 @@ def tarjan_scc(adjacency: dict[int, set[int]]) -> tuple[tuple[tuple[int, ...], .
 def _event_adjacency(events: Iterable[StructuredEvent]) -> dict[int, set[int]]:
     adjacency: dict[int, set[int]] = defaultdict(set)
     for event in events:
-        for source in event.source_node_ids:
+        if event.topology_role != TOPOLOGY_BACKBONE or not event.core_included:
+            continue
+        for source, target in event.topology_arcs:
             adjacency[source]
-        for target in event.target_node_ids:
             adjacency[target]
-        for source in event.source_node_ids:
-            adjacency[source].update(event.target_node_ids)
+            adjacency[source].add(target)
     return {node: set(neighbors) for node, neighbors in adjacency.items()}
 
 
@@ -112,19 +117,49 @@ def _component_graph(
     return dict(forward), dict(reverse)
 
 
-def _distances_to_sink(
+def _ancestors_of_sink(
     sink_component: int,
     reverse_graph: dict[int, set[int]],
-) -> dict[int, int]:
-    distances = {sink_component: 0}
+) -> set[int]:
+    ancestors = {sink_component}
     queue: deque[int] = deque((sink_component,))
     while queue:
         component = queue.popleft()
         for parent in sorted(reverse_graph[component]):
-            if parent in distances:
+            if parent in ancestors:
                 continue
-            distances[parent] = distances[component] + 1
+            ancestors.add(parent)
             queue.append(parent)
+    return ancestors
+
+
+def _longest_distances_to_sink(
+    sink_component: int,
+    component_graph: dict[int, set[int]],
+    reverse_graph: dict[int, set[int]],
+) -> dict[int, int]:
+    """Longest DAG distance guarantees monotone upstream/downstream layers."""
+
+    ancestors = _ancestors_of_sink(sink_component, reverse_graph)
+    remaining_children = {
+        component: len(component_graph[component].intersection(ancestors))
+        for component in ancestors
+    }
+    distances = {component: 0 for component in ancestors}
+    queue: deque[int] = deque(
+        sorted(component for component, count in remaining_children.items() if count == 0)
+    )
+    processed = 0
+    while queue:
+        component = queue.popleft()
+        processed += 1
+        for parent in sorted(reverse_graph[component].intersection(ancestors)):
+            distances[parent] = max(distances[parent], distances[component] + 1)
+            remaining_children[parent] -= 1
+            if remaining_children[parent] == 0:
+                queue.append(parent)
+    if processed != len(ancestors):
+        raise ValueError("condensed component graph is not acyclic")
     return distances
 
 
@@ -143,18 +178,35 @@ def build_structured_records(
     source_graph_json: str,
     parsed_events: tuple[tuple[StructuredEvent, ...], int] | None = None,
 ) -> tuple[StructuredRecord, ...]:
-    """Create one record per sink SCC without text deduplication.
+    """Create one record per sink SCC from the strict ordering backbone.
 
-    Topology is built from every relation/reaction whose endpoints exist,
-    including records the historical producer marked ``renderable=false``.
-    The generic v3 renderer then gives every retained structural event a
-    deterministic text value while preserving the producer flag for audits.
+    Direction-supported relations and reaction projections alone define SCCs,
+    sinks, and longest-distance layers.  Non-directional relations are attached
+    afterwards and never expand a sink view.  A graph with any rejected event
+    is rejected as a whole rather than rebuilt after silently dropping an edge.
     """
 
     events, missing_endpoints = parsed_events if parsed_events is not None else graph_events(graph)
+    if missing_endpoints:
+        return ()
     if not events:
         return ()
-    adjacency = _event_adjacency(events)
+    backbone_events = tuple(
+        event
+        for event in events
+        if event.core_included and event.topology_role == TOPOLOGY_BACKBONE
+    )
+    context_events = tuple(
+        event
+        for event in events
+        if event.core_included and event.topology_role == TOPOLOGY_CONTEXT
+    )
+    globally_excluded_events = tuple(
+        event
+        for event in events
+        if not event.core_included or event.topology_role == TOPOLOGY_EXCLUDED
+    )
+    adjacency = _event_adjacency(backbone_events)
     if not adjacency:
         return ()
     components, node_to_component = tarjan_scc(adjacency)
@@ -179,11 +231,15 @@ def build_structured_records(
 
     output: list[StructuredRecord] = []
     for sink_component in sinks:
-        distances = _distances_to_sink(sink_component, reverse_component_graph)
+        distances = _longest_distances_to_sink(
+            sink_component,
+            component_graph,
+            reverse_component_graph,
+        )
         max_distance = max(distances.values())
         raw_layers: dict[int, list[StructuredEvent]] = defaultdict(list)
         raw_distances: dict[int, int] = {}
-        for event in events:
+        for event in backbone_events:
             target_distances = [
                 distances[node_to_component[target]]
                 for target in event.target_node_ids
@@ -195,6 +251,44 @@ def build_structured_records(
             raw_index = max_distance - distance
             raw_layers[raw_index].append(event)
             raw_distances[raw_index] = distance
+
+        view_excluded_events: list[StructuredEvent] = list(globally_excluded_events)
+        for event in context_events:
+            endpoint_ids = event.source_node_ids + event.target_node_ids
+            if any(node_id not in node_to_component for node_id in endpoint_ids):
+                view_excluded_events.append(
+                    replace(
+                        event,
+                        topology_role=TOPOLOGY_EXCLUDED,
+                        core_included=False,
+                        exclusion_reason="context_not_attached_to_view",
+                    )
+                )
+                continue
+            endpoint_components = [node_to_component[node_id] for node_id in endpoint_ids]
+            if any(component not in distances for component in endpoint_components):
+                view_excluded_events.append(
+                    replace(
+                        event,
+                        topology_role=TOPOLOGY_EXCLUDED,
+                        core_included=False,
+                        exclusion_reason="context_not_attached_to_view",
+                    )
+                )
+                continue
+            endpoint_indices = [
+                max_distance - distances[component]
+                for component in endpoint_components
+            ]
+            raw_index = max(endpoint_indices)
+            attached_event = event
+            if len(set(endpoint_indices)) > 1:
+                attached_event = replace(
+                    event,
+                    topology_role=TOPOLOGY_CONTEXT_CROSS_LAYER,
+                )
+            raw_layers[raw_index].append(attached_event)
+            raw_distances[raw_index] = max_distance - raw_index
 
         layers: list[StructuredLayer] = []
         for normalized_index, raw_index in enumerate(sorted(raw_layers)):
@@ -223,6 +317,9 @@ def build_structured_records(
                 layers=tuple(layers),
                 graph_event_count=len(events) + missing_endpoints,
                 graph_missing_endpoint_event_count=missing_endpoints,
+                excluded_events=tuple(
+                    sorted(view_excluded_events, key=_event_sort_key)
+                ),
             )
         )
     return tuple(output)

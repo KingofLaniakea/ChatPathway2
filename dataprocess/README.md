@@ -6,16 +6,19 @@ events by splitting the concatenated paragraphs under `processed/`.
 
 ## Biological record
 
-For each graph, every relation and reaction with resolvable endpoints becomes
-one stable structured event. Topology is built from all such events, including
-events that the historical producer marked `renderable=false`; that flag is
-kept for provenance and a deterministic generic renderer supplies text. A
-graph with any missing event endpoint is excluded rather than partially
-materialized.
+Relations and reactions are read only from `processed_graph.relations` and
+`processed_graph.reactions`; `processed/` is optional path/text reconciliation,
+never event truth. Direction-bearing relation subtypes and reaction direction
+form the topology backbone. Binding, dissociation, state-change, modification,
+and compound-mediator evidence is retained as context without inventing an
+ordering edge. Missing/unknown relations are excluded explicitly. Any invalid
+endpoint or inconsistent subtype representation rejects the entire graph
+rather than silently deleting one edge and recomputing topology.
 
-The builder condenses cycles with Tarjan SCC and creates one sink-rooted view
-per sink SCC. Layers are ordered graph distance from upstream to downstream;
-events in one layer are an unordered set, not measured time. No event is
+The builder condenses backbone cycles with Tarjan SCC and creates one
+sink-rooted view per sink SCC. Layers use longest distance in the condensation
+DAG and provide ordinal upstream-to-downstream position, not measured time.
+Context can attach to a backbone view but cannot expand it. No event is
 deduplicated by text.
 
 Identity is explicit:
@@ -23,16 +26,27 @@ Identity is explicit:
 - `graph_id`: hash of the relative source path together with the canonical graph JSON content hash;
 - `view_id`: graph plus sorted sink-node signature;
 - `record_id`: graph plus view;
-- `sample_id`: record plus observed-prefix length.
+- `base_sample_id`: record plus observed-prefix length;
+- `sample_id`: base sample plus prompt profile.
 
 The record JSONL keeps organism, pathway, graph/view/event IDs and source
 paths. Those are provenance metadata, not fields the model must generate.
 
 ## Model-visible contract
 
-The question contains only the task instructions, exact JSON shape, and the
-observed structured layers. It contains no explicit pathway name, class, ID,
-block, title, organism, or phenotype field.
+The question shows a complete parseable example of the required JSON shape,
+the observed structured layers, and—under the primary profile—the known KEGG
+organism code. It contains no pathway name, class, ID, block, title, or
+phenotype field.
+
+Three prompt conditions are released:
+
+- `explicit_organism_source_native_ids` (P0): primary training/evaluation;
+- `no_explicit_organism_source_native_ids` (P1): exact paired control, but
+  native IDs can still reveal species;
+- `species_neutral_ids_no_organism` (P2): exact natural-neutral subset using
+  already-neutral KO/compound/glycan/reaction/EC IDs. Prefix stripping is never
+  treated as a mapping.
 
 The closed target is:
 
@@ -60,16 +74,20 @@ in metadata and does not mean a negative phenotype.
 
 ## Split and size policy
 
-- Test uses selected held-out organisms and held-out five-digit KEGG pathway
-  families simultaneously.
-- Validation holds out separate whole families.
-- Train excludes both test and validation families.
-- Selection is deterministic, prioritizes distinct organisms and trajectory
-  lengths within each family, and defaults to at most 256 records per family.
+- Five partitions are fixed: train, validation, strict test, family-only test,
+  and organism-only test. Strict test holds out both organism and five-digit
+  family; the two diagnostic tests isolate those factors.
+- Source graph, graph, view, record, and base-sample identities are disjoint
+  across every partition.
+- Selection is deterministic and organism-first. At least one train-assigned
+  graph per available training organism bypasses fractional sampling, then
+  records are added by organism round-robin. Each family remains capped at 256.
 - At most three evenly spaced prefix rows are stored per train record; each
   training epoch chooses one deterministically.
-- The default build fails below 12,000 accepted train records. The first full
-  v3 timing, not the old v2 row count, determines the final one-day budget.
+- The default release targets 12,000–18,000 accepted train records and at most
+  about 36 million input tokens per epoch. The measured four-A100 baseline and
+  a 12-epoch ceiling target about 60 hours and reject an estimate above 72
+  hours; the first full v3 epoch replaces this estimate with observed speed.
 
 ## Token and JSON policy
 
@@ -117,16 +135,17 @@ python -m experiments.run_experiment prepare-structured-data \
 The release is written to `data/pathway_v3_cap256/`:
 
 - train/validation/test CSV compatibility views;
-- one-record-per-line JSONL for all three splits;
+- five primary P0 CSVs and five one-record-per-line JSONLs;
+- five exact P1 control CSVs and five strict-natural P2 subset CSVs;
+- `source_graph_hashes.jsonl` covering every referenced source artifact;
 - `dataset_manifest.json`;
 - generated read-only `data_audit.json`.
 
-`data_audit.json` contains row, record, source and family counts; strict
-source/record/sample/family overlap; organism overlap; duplicate ID checks;
-phenotype and parser status; event coverage; layer-length and token-length
-distributions; truncation exclusions; and graph-artifact coverage. The CFFF
-experiment scheduler verifies its pass status, read-only mode, manifest hash,
-and all split hashes before allocating GPUs.
+`data_audit.json` contains row, record, source, family, and per-organism counts;
+the full five-way overlap contract; duplicate ID checks; phenotype/parser
+status; event, layer, token, truncation, and graph-artifact coverage; all file
+and source hashes; exact P0/P1 pairing; and P2 natural-neutral eligibility. The
+CFFF scheduler recomputes these checks before allocating GPUs.
 
 ## Historical builders
 

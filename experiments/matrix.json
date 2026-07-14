@@ -1,18 +1,41 @@
 {
-  "version": "2026-07-13f",
-  "purpose": "Direct-inference controlled benchmark on the strictly audited structured pathway-continuation v3 release. All stage-2 arms share one SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
+  "version": "2026-07-15-v3.1",
+  "purpose": "Direct-inference controlled benchmark on the strictly audited structured pathway-continuation v3.1 release. All stage-2 arms share one P0 SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
   "dataset_profile": {
     "name": "structured_pathway_continuation_v3_cap256",
-    "source": "canonical processed_graph relation/reaction records with stable graph, sink-view, record, and sample identity",
-    "selection": "seeded record candidate selection, family cap 256, organism/trajectory-length diversity, at most three prefix rows per train record, and one deterministic prefix per record per epoch",
+    "release_schema": "chatpathway_structured_release_v3.1",
+    "audit_schema": "chatpathway_data_audit_v3.1",
+    "source": "processed_graph nodes, relations, reactions, subtypes, and stable graph/view/record/sample identity; processed text is used only for source-path coverage reconciliation",
+    "relation_truth": "Directed core topology uses only supported directional processed_graph relation subtypes and reaction substrate/product direction. Association, dissociation, state-change, compound-mediator, hidden-compound, and unsupported subtype facts remain context and never create an invented time edge.",
+    "selection": "seeded graph-level candidate selection, accepted-record family cap 256 after strict token filtering with backfill, organism/trajectory-length diversity, at most three prefix rows per train record, and one deterministic prefix per record per epoch",
+    "training_size_budget": "Target about 36,000,000 selected input tokens per epoch, require at least 12,000 accepted records, stop adding at 18,000 records, and fail release if the measured-throughput estimate for the planned 12 SFT epochs exceeds 72 hours.",
+    "primary_prompt_profile": "explicit_organism_source_native_ids",
+    "primary_training_condition": "P0 supplies the known KEGG organism code and retains source-native identifiers; all SFT, AE, HNN, and forced/damped HNN training in this matrix uses only P0 train and validation",
+    "prompt_controls": {
+      "no_explicit_organism_source_native_ids": "P1 removes only the explicit organism name; source-native identifiers may still reveal species, so this is not a species-free condition.",
+      "species_neutral_ids_no_organism": "P2 is restricted to naturally species-neutral identifiers or a separately audited mapping; prefix stripping is forbidden and incomplete eligibility must be reported explicitly."
+    },
     "train": "data/pathway_v3_cap256/train_pathway_continuation_v3_cap256.csv",
-    "validation": "data/pathway_v3_cap256/validation_pathway_continuation_v3.csv (whole held-out pathway families)",
-    "core_eval": "data/pathway_v3_cap256/test_pathway_continuation_v3.csv (held-out organisms and held-out five-digit KEGG pathway families)",
+    "validation": "data/pathway_v3_cap256/validation_pathway_continuation_v3.csv",
+    "diagnostic_tests": {
+      "test": "data/pathway_v3_cap256/test_pathway_continuation_v3.csv (held-out organisms and held-out pathway families)",
+      "test_family_only": "data/pathway_v3_cap256/test_family_only_pathway_continuation_v3.csv (seen organisms and the strict-test held-out families)",
+      "test_organism_only": "data/pathway_v3_cap256/test_organism_only_pathway_continuation_v3.csv (held-out organisms and training families)"
+    },
+    "record_jsonl": {
+      "train": "data/pathway_v3_cap256/train_pathway_records_v3.jsonl",
+      "validation": "data/pathway_v3_cap256/validation_pathway_records_v3.jsonl",
+      "test": "data/pathway_v3_cap256/test_pathway_records_v3.jsonl",
+      "test_family_only": "data/pathway_v3_cap256/test_family_only_pathway_records_v3.jsonl",
+      "test_organism_only": "data/pathway_v3_cap256/test_organism_only_pathway_records_v3.jsonl"
+    },
     "release_manifest": "data/pathway_v3_cap256/dataset_manifest.json",
     "immutable_audit": "data/pathway_v3_cap256/data_audit.json",
-    "semantic_unit": "ordered graph layers; canonical relation/reaction events inside one layer form an unordered set and never consume separate ODE time",
+    "source_graph_hashes": "data/pathway_v3_cap256/source_graph_hashes.jsonl",
+    "release_gate": "The scheduler requires all five P0 CSV/record JSONL pairs, schema v3.1, exact P0 prompt metadata, complete SHA-256 agreement, a passing fixed overlap contract, zero accepted rows above 8192 tokens, verified source graphs, and data_audit.json mode 0444.",
+    "semantic_unit": "graph layers are ordinal causal depth rather than measured biological time; within-layer events retain parallel-event provenance and are not serialized into invented biological time",
     "epoch_prefix_sampling": "record-centric and seed/epoch deterministic; SFT emphasizes short continuation twice per four-record-epochs plus one middle and one long view, while HNN/FDHNN emphasizes long continuation twice plus one middle and one short view; validation prefixes remain fixed",
-    "source_schema_note": "v3 reconstructs sink-SCC views directly from all processed_graph structural events. It does not recover event boundaries from concatenated paragraphs and excludes phenotype from the core target."
+    "source_schema_note": "v3.1 reconstructs sink-SCC views from strict processed_graph topology and carries context events without letting them expand the sink view. It does not recover event boundaries from concatenated paragraphs and excludes phenotype from the core target."
   },
   "replicate_seeds": [20260711, 20260712, 20260713],
   "sequence_budget": {
@@ -28,8 +51,8 @@
   },
   "validation_policy": {
     "group_column": "pathway_family_id",
-    "selection": "explicit deterministic family-disjoint validation CSV reused by SFT, AE, and every stage-2 arm",
-    "reason": "checkpoint selection is aligned with the unseen-pathway-family core test rather than in-family source holdout"
+    "selection": "explicit deterministic family-disjoint P0 validation CSV on seen organisms, reused by SFT, AE, and every stage-2 arm",
+    "reason": "checkpoint selection measures unseen-family generalization without conflating it with the separate held-out-organism effect"
   },
   "artifact_scope": "checkpoints/seeds/<seed>/... and runs/seeds/<seed>/...; within a seed all stage-2 arms reuse that seed's shared SFT and AE",
   "axis_taxonomy": {

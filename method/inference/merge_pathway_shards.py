@@ -212,9 +212,18 @@ def merge_shards(
         raise ValueError("shard CSV and progress index sets differ")
     provenance_fields = {
         "sample_id": "sample_id",
+        "base_sample_id": "base_sample_id",
         "record_id": "record_id",
+        "graph_id": "graph_id",
+        "view_id": "view_id",
         "organism": "organism",
         "pathway_family_id": "pathway_family_id",
+        "source_graph_json": "source_graph_json",
+        "prompt_profile": "prompt_profile",
+        "organism_conditioning": "organism_conditioning",
+        "entity_id_space": "entity_id_space",
+        "entity_mapping_status": "entity_mapping_status",
+        "prefix_horizon": "prefix_horizon",
         "gold_answer": "answer",
     }
     for index in range(len(source_rows)):
@@ -222,6 +231,8 @@ def merge_shards(
         output_row = output_by_index[index]
         progress_row = progress_by_index[index]
         for progress_field, source_field in provenance_fields.items():
+            if source_field not in source_fields:
+                continue
             expected = source_row.get(source_field, "")
             if str(progress_row.get(progress_field, "")) != expected:
                 raise ValueError(

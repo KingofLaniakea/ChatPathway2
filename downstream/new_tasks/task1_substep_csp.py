@@ -122,6 +122,8 @@ STRUCTURED_RELATION_FORMS = {
     "dissociation": "dissociate",
     "indirect effect": "indirect_effect",
     "state change": "state_change",
+    "irreversible_conversion": "irreversible_conversion",
+    "reversible_conversion": "reversible_conversion",
 }
 PARSER_VERSION = "atomic_relation_v2"
 RELATION_RE = re.compile(

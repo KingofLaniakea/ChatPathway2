@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from experiments import run_experiment
 from experiments._launch import (
     controlled_inference_budget_args,
     controlled_training_budget_args,
@@ -16,6 +18,45 @@ from experiments.check_runtime_assets import rewrite_asset_path
 
 
 class LaunchTests(unittest.TestCase):
+    def test_structured_release_entry_forwards_v31_build_controls(self) -> None:
+        completed = SimpleNamespace(returncode=0)
+        argv = [
+            "run_experiment",
+            "prepare-structured-data",
+            "--workers",
+            "3",
+            "--worker-batch-size",
+            "64",
+            "--max-files",
+            "2",
+            "--overwrite",
+        ]
+        with patch.object(sys, "argv", argv), patch.object(
+            run_experiment, "asset_path", side_effect=lambda value: f"/assets/{value}"
+        ), patch.object(
+            run_experiment.subprocess, "run", return_value=completed
+        ) as run:
+            with self.assertRaises(SystemExit) as exit_context:
+                run_experiment.main()
+
+        self.assertEqual(exit_context.exception.code, 0)
+        command = run.call_args.args[0]
+        expected = {
+            "--processed-graph-root": "/assets/KEGG_all_new/processed_graph",
+            "--processed-root": "/assets/KEGG_all_new/processed",
+            "--max-length": "8192",
+            "--evaluation-candidate-record-fraction": "1.0",
+            "--seen-evaluation-candidate-record-fraction": "0.02",
+            "--max-records-per-family": "256",
+            "--maximum-train-records": "18000",
+            "--target-train-input-tokens-per-epoch": "36000000",
+            "--workers": "3",
+            "--worker-batch-size": "64",
+            "--max-files": "2",
+        }
+        for option, value in expected.items():
+            self.assertEqual(command[command.index(option) + 1], value)
+
     def test_controlled_training_uses_one_prefix_per_record_per_epoch(self) -> None:
         args = controlled_training_budget_args()
         self.assertEqual(

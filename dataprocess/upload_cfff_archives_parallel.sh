@@ -216,6 +216,10 @@ fi
 fail=0
 pids=()
 pid_names=()
+# macOS still ships Bash 3.2, where expanding an empty array under `set -u`
+# raises "unbound variable".  The scheduler intentionally reaches an empty
+# array after the final worker, so disable nounset only for this small block.
+set +u
 reap_one() {
   local index
   while true; do
@@ -247,6 +251,7 @@ done
 while [[ ${#pids[@]} -gt 0 ]]; do
   reap_one
 done
+set -u
 
 if [[ "$fail" -ne 0 ]]; then
   echo "status=failed" >>"$run_log"

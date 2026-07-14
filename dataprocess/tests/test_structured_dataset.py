@@ -8,12 +8,20 @@ import unittest
 from pathlib import Path
 
 from dataprocess.audit_dataset_release import file_sha256, generate_release_audit
-from dataprocess.schemas import CSV_FIELDNAMES
 from dataprocess.structured_schema import (
     StructuredEvent,
     StructuredRecord,
+    TOPOLOGY_BACKBONE,
+    TOPOLOGY_CONTEXT,
+    TOPOLOGY_CONTEXT_CROSS_LAYER,
+    TOPOLOGY_EXCLUDED,
+    V3_CSV_FIELDNAMES,
     csv_row,
+    event_from_reaction,
+    event_from_relation,
+    graph_events,
     graph_id_for_source,
+    record_from_object,
 )
 from dataprocess.structured_views import build_structured_records, tarjan_scc
 
@@ -27,10 +35,17 @@ class CharacterTokenizer:
 def node(node_id: int, name: str) -> dict[str, object]:
     return {
         "node_id": node_id,
+        "entry_id": node_id,
+        "node_kind": "entry",
+        "entity_type": "ortholog",
         "canonical_id": f"ko:K{node_id:05d}",
         "display_name": name,
         "resolved_ids": [f"ko:K{node_id:05d}"],
         "raw_name": f"ko:K{node_id:05d}",
+        "aliases": [],
+        "unresolved_tokens": [],
+        "component_entry_ids": [],
+        "resolved": True,
     }
 
 
@@ -40,11 +55,55 @@ def relation(relation_id: int, source: int, target: int, *, renderable: bool) ->
         "entry1_id": source,
         "entry2_id": target,
         "relation_type": "PPrel",
+        "subtypes": [{"name": "activation", "value": "-->"}],
         "subtype_names": ["activation"],
         "semantic_tags": ["activation"],
         "mediator_entry_id": None,
         "has_missing_interaction": False,
         "renderable": renderable,
+    }
+
+
+def relation_with_subtypes(
+    relation_id: int,
+    source: int,
+    target: int,
+    *subtypes: tuple[str, str],
+) -> dict[str, object]:
+    names = [name for name, _ in subtypes]
+    visible_compounds = [
+        int(value) for name, value in subtypes if name == "compound"
+    ]
+    return {
+        "relation_id": relation_id,
+        "entry1_id": source,
+        "entry2_id": target,
+        "relation_type": "PPrel",
+        "subtypes": [
+            {"name": name, "value": value} for name, value in subtypes
+        ],
+        "subtype_names": names,
+        "semantic_tags": names,
+        "mediator_entry_id": visible_compounds[-1] if visible_compounds else None,
+        "has_missing_interaction": "missing interaction" in names,
+        "renderable": True,
+    }
+
+
+def reaction(
+    reaction_id: int,
+    substrates: list[int],
+    products: list[int],
+    *,
+    reaction_type: str,
+) -> dict[str, object]:
+    return {
+        "reaction_id": reaction_id,
+        "reaction_name": f"rn:R{reaction_id:05d}",
+        "reaction_type": reaction_type,
+        "substrate_entry_ids": substrates,
+        "product_entry_ids": products,
+        "renderable": True,
     }
 
 
@@ -120,6 +179,205 @@ class StructuredViewTests(unittest.TestCase):
         self.assertEqual(set(answer), {"schema_version", "remaining_layers"})
 
 
+class StrictGraphSemanticsTests(unittest.TestCase):
+    def graph(
+        self,
+        *,
+        nodes: list[dict[str, object]],
+        relations: list[dict[str, object]] | None = None,
+        reactions: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "metadata": {"organism": "aaa", "pathway_id": "aaa00010"},
+            "nodes": nodes,
+            "relations": relations or [],
+            "reactions": reactions or [],
+        }
+
+    def test_reactions_use_fixed_labels_and_explicit_direction_arcs(self) -> None:
+        nodes = [node(index, chr(64 + index)) for index in range(1, 5)]
+        irreversible = event_from_reaction(
+            reaction(0, [1, 2], [3, 4], reaction_type="irreversible"),
+            {int(value["node_id"]): value for value in nodes},
+        )
+        self.assertEqual(irreversible.relation, "irreversible_conversion")
+        self.assertEqual(
+            irreversible.topology_arcs,
+            ((1, 3), (1, 4), (2, 3), (2, 4)),
+        )
+        reversible = event_from_reaction(
+            reaction(1, [1], [2], reaction_type="reversible"),
+            {int(value["node_id"]): value for value in nodes},
+        )
+        self.assertEqual(reversible.relation, "reversible_conversion")
+        self.assertEqual(reversible.topology_arcs, ((1, 2), (2, 1)))
+        self.assertEqual(reversible.topology_role, TOPOLOGY_BACKBONE)
+
+    def test_relation_direction_context_and_missing_are_separate(self) -> None:
+        nodes = [node(index, chr(64 + index)) for index in range(1, 4)]
+        lookup = {int(value["node_id"]): value for value in nodes}
+        directional = event_from_relation(
+            relation_with_subtypes(0, 1, 2, ("activation", "-->")),
+            lookup,
+        )
+        self.assertEqual(directional.topology_role, TOPOLOGY_BACKBONE)
+        self.assertEqual(directional.topology_arcs, ((1, 2),))
+
+        context = event_from_relation(
+            relation_with_subtypes(1, 1, 2, ("binding/association", "---")),
+            lookup,
+        )
+        self.assertEqual(context.topology_role, TOPOLOGY_CONTEXT)
+        self.assertEqual(context.topology_arcs, ())
+        self.assertTrue(context.core_included)
+
+        missing = event_from_relation(
+            relation_with_subtypes(2, 1, 2, ("missing interaction", "--")),
+            lookup,
+        )
+        self.assertEqual(missing.topology_role, TOPOLOGY_EXCLUDED)
+        self.assertFalse(missing.core_included)
+        self.assertEqual(missing.exclusion_reason, "missing_interaction")
+
+    def test_compound_mediator_is_provenance_not_source(self) -> None:
+        nodes = [node(index, chr(64 + index)) for index in range(1, 4)]
+        event = event_from_relation(
+            relation_with_subtypes(
+                0,
+                1,
+                2,
+                ("activation", "-->"),
+                ("compound", "3"),
+            ),
+            {int(value["node_id"]): value for value in nodes},
+        )
+        self.assertEqual(event.source_node_ids, (1,))
+        self.assertEqual(event.mediator_node_ids, (3,))
+        self.assertEqual([value["canonical_id"] for value in event.source], ["ko:K00001"])
+        self.assertEqual([value["canonical_id"] for value in event.mediator], ["ko:K00003"])
+        self.assertNotIn("ko:K00003", [value["canonical_id"] for value in event.source])
+        self.assertEqual(set(event.model_object()), {"source", "relation", "target", "text"})
+
+        hidden = event_from_relation(
+            relation_with_subtypes(1, 1, 2, ("hidden compound", "3")),
+            {int(value["node_id"]): value for value in nodes},
+        )
+        self.assertEqual(hidden.mediator_node_ids, (3,))
+        self.assertEqual(hidden.topology_role, TOPOLOGY_CONTEXT)
+
+    def test_unknown_relation_extension_is_explicitly_excluded(self) -> None:
+        nodes = [node(1, "A"), node(2, "B")]
+        extension = event_from_relation(
+            relation_with_subtypes(0, 1, 2, ("vendor extension", "?")),
+            {int(value["node_id"]): value for value in nodes},
+        )
+        self.assertEqual(extension.topology_role, TOPOLOGY_EXCLUDED)
+        self.assertFalse(extension.core_included)
+        self.assertEqual(extension.exclusion_reason, "unknown_subtypes:vendor extension")
+
+    def test_invalid_subtype_or_identity_rejects_the_whole_graph(self) -> None:
+        relations = [
+            relation(0, 1, 2, renderable=True),
+            relation(1, 2, 3, renderable=True),
+        ]
+        relations[1]["semantic_tags"] = ["inhibition"]
+        graph = self.graph(
+            nodes=[node(1, "A"), node(2, "B"), node(3, "C")],
+            relations=relations,
+        )
+        valid_events, rejected = graph_events(graph)
+        self.assertEqual(len(valid_events), 1)
+        self.assertEqual(rejected, 1)
+        self.assertEqual(
+            build_structured_records(
+                graph,
+                graph_id="graph:test",
+                source_graph_json="aaa/aaa00010.json",
+            ),
+            (),
+        )
+
+        bad_nodes = [node(1, "A"), node(2, "B")]
+        bad_nodes[1]["canonical_id"] = "ko:NOT_RESOLVED"
+        bad_graph = self.graph(
+            nodes=bad_nodes,
+            relations=[relation(0, 1, 2, renderable=True)],
+        )
+        self.assertEqual(
+            build_structured_records(
+                bad_graph,
+                graph_id="graph:test",
+                source_graph_json="aaa/aaa00010.json",
+            ),
+            (),
+        )
+
+    def test_group_and_multi_id_endpoints_are_lossless_and_round_trip(self) -> None:
+        first = node(1, "A")
+        first["resolved_ids"] = ["ko:K00001", "ko:K10001"]
+        group = node(3, "A and B")
+        group.update(
+            {
+                "entity_type": "group",
+                "canonical_id": None,
+                "resolved_ids": [],
+                "raw_name": "group:1+2",
+                "component_entry_ids": [1, 2],
+            }
+        )
+        graph = self.graph(
+            nodes=[first, node(2, "B"), group, node(4, "C")],
+            relations=[relation(0, 3, 4, renderable=True)],
+        )
+        records = build_structured_records(
+            graph,
+            graph_id="graph:test",
+            source_graph_json="aaa/aaa00010.json",
+        )
+        self.assertEqual(len(records), 1)
+        event = records[0].layers[0].events[0]
+        self.assertEqual(
+            [value["canonical_id"] for value in event.source],
+            ["ko:K00001", "ko:K10001", "ko:K00002"],
+        )
+        self.assertEqual(event.source_entity_provenance[0]["component_entry_ids"], [1, 2])
+        rebuilt = record_from_object(records[0].record_object())
+        self.assertEqual(rebuilt.record_object(), records[0].record_object())
+
+    def test_longest_distance_orders_branches_and_context_never_expands_view(self) -> None:
+        graph = self.graph(
+            nodes=[node(index, chr(64 + index)) for index in range(1, 6)],
+            relations=[
+                relation(0, 4, 1, renderable=True),
+                relation(1, 1, 2, renderable=True),
+                relation(2, 1, 3, renderable=True),
+                relation(3, 2, 3, renderable=True),
+                relation_with_subtypes(4, 1, 3, ("binding/association", "---")),
+                relation_with_subtypes(5, 3, 5, ("binding/association", "---")),
+            ],
+        )
+        records = build_structured_records(
+            graph,
+            graph_id="graph:test",
+            source_graph_json="aaa/aaa00010.json",
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            [layer.distance_to_sink for layer in records[0].layers],
+            [2, 1, 0],
+        )
+        by_id = {
+            event.event_id: event
+            for layer in records[0].layers
+            for event in layer.events
+        }
+        self.assertEqual(by_id["relation:4"].topology_role, TOPOLOGY_CONTEXT_CROSS_LAYER)
+        self.assertNotIn("relation:5", by_id)
+        excluded = {event.event_id: event for event in records[0].excluded_events}
+        self.assertEqual(excluded["relation:5"].exclusion_reason, "context_not_attached_to_view")
+        self.assertEqual(records[0].sink_node_ids, (3,))
+
+
 class ReleaseAuditTests(unittest.TestCase):
     def event(self, suffix: str) -> StructuredEvent:
         return StructuredEvent(
@@ -169,7 +427,7 @@ class ReleaseAuditTests(unittest.TestCase):
 
     def write_csv(self, path: Path, rows: list[dict[str, object]]) -> None:
         with path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=CSV_FIELDNAMES)
+            writer = csv.DictWriter(handle, fieldnames=V3_CSV_FIELDNAMES)
             writer.writeheader()
             writer.writerows(rows)
 

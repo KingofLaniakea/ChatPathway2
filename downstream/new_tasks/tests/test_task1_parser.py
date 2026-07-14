@@ -91,6 +91,28 @@ class Task1SubstepParserTests(unittest.TestCase):
         self.assertEqual(parsed.substeps[0].relation, "activate")
         self.assertEqual(parsed.substeps[0].target, ("hsa:2",))
 
+    def test_v3_reaction_label_is_not_collapsed_into_a_generic_relation(self) -> None:
+        parsed = parse_substeps(
+            {
+                "schema_version": "pathway_continuation_v3",
+                "remaining_layers": [
+                    {
+                        "layer_index": 1,
+                        "events": [
+                            {
+                                "source": [{"canonical_id": "cpd:C00001", "name": "A"}],
+                                "relation": "reversible_conversion",
+                                "target": [{"canonical_id": "cpd:C00002", "name": "B"}],
+                                "text": "A is shown as reversibly connected to B in the KEGG pathway map.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertTrue(parsed.strict_schema_valid)
+        self.assertEqual(parsed.substeps[0].relation, "reversible_conversion")
+
 
 if __name__ == "__main__":
     unittest.main()

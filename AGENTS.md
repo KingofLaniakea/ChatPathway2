@@ -19,7 +19,10 @@
 
 - The 16 `KEGG_all_new_processed` archives passed SHA256 verification on 2026-07-11.
 - All 16 archive sentinels are already present under `KEGG_all_new/processed`; do not re-extract them without a concrete reason.
-- `KEGG_all_new/processed_graph` is not present. Do not claim phenotype supervision from this dataset until the phenotype source and schema are resolved.
+- `KEGG_all_new/processed_graph` has been restored and SHA256-verified on CFFF: 1,368,605 JSON files in 10,859 top-level directories.
+- Relation and reaction truth comes from `processed_graph`; `processed` is optional path/text reconciliation only.
+- Phenotype supervision is disabled for the core dataset. `phenotype_status=not_annotated` is metadata and must never be interpreted as a negative phenotype label.
+- The strict `pathway_v3_cap256` release must pass its read-only `data_audit.json` before it is used by training or evaluation.
 
 ## Verification
 
