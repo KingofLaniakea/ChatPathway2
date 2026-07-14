@@ -328,7 +328,7 @@ def main() -> None:
     prepare_structured.add_argument("--test-organisms", default="tru,xtr,dre,gga,dmk,dme,cel")
     prepare_structured.add_argument("--test-family-fraction", type=float, default=0.05)
     prepare_structured.add_argument("--validation-family-fraction", type=float, default=0.05)
-    prepare_structured.add_argument("--train-candidate-record-fraction", type=float, default=0.003)
+    prepare_structured.add_argument("--train-candidate-record-fraction", type=float, default=0.02)
     prepare_structured.add_argument("--evaluation-candidate-record-fraction", type=float, default=1.0)
     prepare_structured.add_argument(
         "--seen-evaluation-candidate-record-fraction", type=float, default=0.02
@@ -340,7 +340,7 @@ def main() -> None:
     )
     prepare_structured.add_argument("--max-prefixes-per-train-record", type=int, default=3)
     prepare_structured.add_argument("--minimum-train-records", type=int, default=12000)
-    prepare_structured.add_argument("--coverage-graphs-per-train-organism", type=int, default=1)
+    prepare_structured.add_argument("--coverage-graphs-per-train-organism", type=int, default=5)
     prepare_structured.add_argument(
         "--reference-input-tokens-per-second", type=float, default=2418.9274035045514
     )

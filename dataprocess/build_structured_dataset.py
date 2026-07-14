@@ -646,7 +646,7 @@ def scan_candidates(
     progress_every: int,
     workers: int = 1,
     worker_batch_size: int = DEFAULT_WORKER_BATCH_SIZE,
-    coverage_graphs_per_train_organism: int = 1,
+    coverage_graphs_per_train_organism: int = 5,
 ) -> dict[str, int]:
     """Build candidates serially or with deterministic ordered worker batches."""
 
@@ -1363,7 +1363,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--coverage-graphs-per-train-organism",
         type=int,
-        default=1,
+        default=5,
         help=(
             "Always inspect this many deterministic train-assigned graphs per "
             "organism before applying the global train candidate fraction."
@@ -1375,7 +1375,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--test-organisms", default=DEFAULT_TEST_ORGANISMS)
     parser.add_argument("--test-family-fraction", type=float, default=0.05)
     parser.add_argument("--validation-family-fraction", type=float, default=0.05)
-    parser.add_argument("--train-candidate-record-fraction", type=float, default=0.003)
+    parser.add_argument("--train-candidate-record-fraction", type=float, default=0.02)
     parser.add_argument("--evaluation-candidate-record-fraction", type=float, default=1.0)
     parser.add_argument(
         "--seen-evaluation-candidate-record-fraction",
@@ -1693,7 +1693,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError(
             f"accepted train records={split_outputs['train']['records']} is below "
             f"--minimum-train-records={args.minimum_train_records} after strict token filtering; "
-            "increase --train-candidate-record-fraction and rebuild"
+            "increase --coverage-graphs-per-train-organism and/or "
+            "--train-candidate-record-fraction, then rebuild"
         )
 
     sources = referenced_sources(paths[f"{split}_records"] for split in SPLITS)
