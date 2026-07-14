@@ -24,6 +24,7 @@ from experiments.runtime_config import asset_root as configured_asset_root
 
 MATRIX_PATH = Path(__file__).with_name("matrix.json")
 RUNTIME_MANIFEST_PATH = Path(__file__).with_name("runtime_manifest.json")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -44,7 +45,7 @@ def command_parts(command: str) -> tuple[str | None, list[str]]:
 
 
 def module_to_file(module: str) -> Path:
-    return Path(*module.split(".")).with_suffix(".py")
+    return REPOSITORY_ROOT / Path(*module.split(".")).with_suffix(".py")
 
 
 def literal_string_set(node: ast.AST) -> set[str] | None:
