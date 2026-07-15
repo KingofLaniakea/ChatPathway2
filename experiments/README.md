@@ -24,17 +24,19 @@ not claim phylogenetic balance. The scheduler refuses to start unless the
 generated read-only `data_audit.json` has passed and all five CSV/record pairs,
 source graphs, and declared hashes still match.
 
-All mutable artifacts are seed-scoped:
+All mutable artifacts are scoped by both immutable dataset build and seed:
 
 ```text
-checkpoints/seeds/<seed>/shared/...
-checkpoints/seeds/<seed>/experiments/<row>/...
-runs/seeds/<seed>/experiments/<row>/...
+checkpoints/datasets/<dataset_build>/seeds/<seed>/shared/...
+checkpoints/datasets/<dataset_build>/seeds/<seed>/experiments/<row>/...
+runs/datasets/<dataset_build>/seeds/<seed>/experiments/<row>/...
 ```
 
-Within one seed, every D1--D4 row reuses exactly that seed's
-shared SFT and AE. Recommended seeds are `20260711`, `20260712`, and
-`20260713`.
+The CFFF scheduler derives `<dataset_build>` from the hashed
+`dataset_build_id` in `dataset_manifest.json`; a successful checkpoint from an
+older release can therefore never satisfy a new release's dependency. Within
+one dataset build and seed, every D1--D4 row reuses exactly that shared SFT and
+AE. Recommended seeds are `20260711`, `20260712`, and `20260713`.
 
 The B1 AE baseline is pure reconstruction MSE. Optional B2 next-layer
 prediction and B3 latent mean/variance/off-diagonal-covariance losses are
@@ -52,7 +54,7 @@ they never truncate an assistant JSON target.
 The formal default is one full-data stage-1 SFT epoch, followed by at most
 three AE epochs, one to three dynamics-only epochs, and at most three stage-2
 epochs. This prevents the underlying trainers' historical 12-epoch defaults
-from silently turning a 515-million-token release into an unintended run.
+from silently turning a large release into an unintended multi-epoch run.
 
 The formal v4 release contains exactly one seed-fixed prefix per selected
 biological record. A global constrained matcher balances the actually eligible
@@ -97,11 +99,14 @@ python -m experiments.run_experiment check-assets \
 
 The indexer reconstructs complete rich-action event sets from every
 `processed_graph` JSON without sampling or a family cap. Materialization uses a
-conservative 515-million-token one-epoch envelope, writes one record JSONL and
+conservative 515-million-token candidate envelope, writes one record JSONL and
 one compatibility CSV row per selected record, and creates
 `dataset_manifest.json` plus read-only `data_audit.json`. The minimum of 12,000
-train records prevents silently releasing another short run. The first measured
-v4 packed-training throughput replaces the current runtime estimate.
+train records prevents silently releasing another short run. Before formal SFT,
+the scheduler enforces a 48-hour one-epoch ceiling from the immutable token
+count. If the full candidate envelope exceeds it, the canonical index must be
+rematerialized into a separately named and separately audited release; CSV rows
+must never be deleted by hand to meet the time budget.
 
 ## One-seed run
 
@@ -139,6 +144,24 @@ python -m experiments.run_cfff_matrix \
   --seeds 20260711,20260712,20260713 \
   --gpus 0,1,2,3
 ```
+
+To launch only the first formal four-card SFT epoch, without automatically
+starting AE or inference afterward:
+
+```bash
+python -m experiments.run_cfff_matrix \
+  --seeds 20260711 \
+  --gpus 0,1,2,3 \
+  --only-shared-sft \
+  --max-sft-epoch-hours 48
+```
+
+SFT uses PyTorch SDPA, four CPU tokenizer workers per GPU, length-adjacent
+global DDP batches, pinned-memory prefetch, and disjoint four-card validation.
+The formal per-GPU batch size remains one until an 8192-token stress sample
+proves a larger value safe and faster. Metrics record train/validation tokens,
+seconds, throughput, truncation counters, loss, input hashes, and the exact
+dataset-build-scoped output path.
 
 To evaluate only the shared-SFT baseline without launching AE or any stage-2
 arm, select the dependency-closed baseline subgraph explicitly:

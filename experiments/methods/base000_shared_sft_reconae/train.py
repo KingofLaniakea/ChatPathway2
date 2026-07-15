@@ -14,6 +14,7 @@ if __name__ == "__main__":
             "torchrun:method.training.sft",
             [
                 *controlled_training_budget_args(),
+                "--dataloader-workers", "4",
                 "--epochs", "1",
                 "--base-model", asset_path("models/qwen3_8B"),
                 "--train", asset_path("data/pathway_v4_full/train_pathway_continuation_v4.csv"),

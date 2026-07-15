@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import sys
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,6 +13,7 @@ from experiments import run_experiment
 from experiments._launch import (
     controlled_inference_budget_args,
     controlled_training_budget_args,
+    dataset_namespace,
     experiment_seed,
     seeded_asset_path,
     step_commands,
@@ -91,7 +95,51 @@ class LaunchTests(unittest.TestCase):
                 self.assertEqual(experiment_seed(), "20260712")
                 self.assertEqual(
                     seeded_asset_path("checkpoints/shared/model"),
-                    "/assets/checkpoints/seeds/20260712/shared/model",
+                    "/assets/checkpoints/datasets/pathway_v4_full/seeds/20260712/shared/model",
+                )
+
+    def test_dataset_namespace_scopes_mutable_assets(self) -> None:
+        with patch.object(sys, "argv", ["wrapper", "--seed", "20260712"]):
+            with patch.dict(
+                os.environ,
+                {
+                    "CHATPATHWAY_ASSET_ROOT": "/assets",
+                    "CHATPATHWAY_DATASET_NAMESPACE": "pathway_v4_full_deadbeef",
+                },
+                clear=False,
+            ):
+                self.assertEqual(dataset_namespace(), "pathway_v4_full_deadbeef")
+                self.assertEqual(
+                    seeded_asset_path("runs/experiments/example"),
+                    "/assets/runs/datasets/pathway_v4_full_deadbeef/seeds/20260712/experiments/example",
+                )
+
+    def test_dataset_namespace_rejects_path_components(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"CHATPATHWAY_DATASET_NAMESPACE": "../wrong"},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                dataset_namespace()
+
+    def test_dataset_namespace_is_derived_from_manifest_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory) / "data/pathway_v4_full"
+            release.mkdir(parents=True)
+            (release / "dataset_manifest.json").write_text(
+                json.dumps({"dataset_build_id": "dataset:" + "b" * 24}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"CHATPATHWAY_ASSET_ROOT": directory},
+                clear=False,
+            ):
+                os.environ.pop("CHATPATHWAY_DATASET_NAMESPACE", None)
+                self.assertEqual(
+                    dataset_namespace(),
+                    "pathway_v4_full_" + "b" * 24,
                 )
 
     def test_seed_environment_override_has_precedence(self) -> None:
@@ -106,11 +154,14 @@ class LaunchTests(unittest.TestCase):
     def test_runtime_manifest_default_seed_can_be_rewritten(self) -> None:
         with patch.dict(os.environ, {"CHATPATHWAY_EXPERIMENT_SEED": "20260713"}, clear=False):
             resolved = rewrite_asset_path(
-                "/root/autodl-tmp/checkpoints/seeds/20260711/shared/model",
+                "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/model",
                 "/root/autodl-tmp",
                 "/assets",
             )
-        self.assertEqual(str(resolved), "/assets/checkpoints/seeds/20260713/shared/model")
+        self.assertEqual(
+            str(resolved),
+            "/assets/checkpoints/datasets/pathway_v4_full/seeds/20260713/shared/model",
+        )
 
 
 if __name__ == "__main__":

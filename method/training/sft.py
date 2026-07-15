@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
+import stat
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -17,7 +20,7 @@ import torch.nn as nn
 import torch.optim as optim
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, Dataset, DistributedSampler
+from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -57,6 +60,7 @@ class SFTConfig:
     save_dir: str
     resume_adapter: str | None
     batch_size: int
+    dataloader_workers: int
     gradient_accumulation_steps: int
     lr: float
     epochs: int
@@ -70,6 +74,7 @@ class SFTConfig:
     lora_alpha: int
     lora_dropout: float
     target_modules: str
+    attn_implementation: str
     gradient_checkpointing: bool
     validation_fraction: float
     validation_group_column: str
@@ -113,6 +118,18 @@ class SFTDataset(Dataset):
     def selection_summary(self) -> dict[str, int]:
         return self.prefix_view.selection_summary()
 
+    def estimated_text_length(self, index: int) -> int:
+        """Cheap stable proxy used only to group similar DDP sequence lengths."""
+
+        row = self.prefix_view.row(index)
+        answer = str(
+            row.get(
+                self.text_column,
+                row.get("answer", row.get("formatted_answer_no_phenotype", "")),
+            )
+        )
+        return len(str(row.get("question", ""))) + len(answer)
+
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         row = self.prefix_view.row(index)
         question = str(row.get("question", ""))
@@ -131,6 +148,66 @@ class SFTDataset(Dataset):
             "prompt_tokens_dropped": encoded.prompt_tokens_dropped,
             "answer_tokens_dropped": encoded.answer_tokens_dropped,
         }
+
+
+class LengthGroupedDistributedSampler(Sampler[int]):
+    """Shard length-adjacent global batches across DDP ranks without loss.
+
+    All ranks still receive the same number of samples and collectively cover
+    the complete dataset.  Only the order changes: samples processed in one
+    synchronized optimizer step have similar text lengths, reducing idle time
+    while a rank waits for another rank's much longer sequence.
+    """
+
+    def __init__(
+        self,
+        dataset: SFTDataset,
+        *,
+        num_replicas: int,
+        rank: int,
+        batch_size: int,
+        seed: int,
+    ) -> None:
+        if len(dataset) < 1:
+            raise ValueError("length-grouped sampler requires a non-empty dataset")
+        if num_replicas < 1 or not 0 <= rank < num_replicas or batch_size < 1:
+            raise ValueError("invalid distributed sampler geometry")
+        self.dataset = dataset
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.batch_size = batch_size
+        self.seed = seed
+        self.epoch = 0
+        self.global_batch_size = num_replicas * batch_size
+        self.global_batches = math.ceil(len(dataset) / self.global_batch_size)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __len__(self) -> int:
+        return self.global_batches * self.batch_size
+
+    def __iter__(self):
+        ordered = sorted(
+            range(len(self.dataset)),
+            key=self.dataset.estimated_text_length,
+        )
+        groups: list[list[int]] = []
+        for offset in range(0, len(ordered), self.global_batch_size):
+            group = ordered[offset : offset + self.global_batch_size]
+            if len(group) < self.global_batch_size:
+                original = tuple(group)
+                group.extend(
+                    original[index % len(original)]
+                    for index in range(self.global_batch_size - len(group))
+                )
+            groups.append(group)
+        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        group_order = torch.randperm(len(groups), generator=generator).tolist()
+        start = self.rank * self.batch_size
+        end = start + self.batch_size
+        selected = [index for group_index in group_order for index in groups[group_index][start:end]]
+        return iter(selected)
 
 
 def make_collate_fn(pad_id: int):
@@ -167,6 +244,7 @@ def parse_args() -> SFTConfig:
     parser.add_argument("--save-dir", default=DEFAULT_SAVE)
     parser.add_argument("--resume-adapter")
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--dataloader-workers", type=int, default=0)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--epochs", type=int, default=1)
@@ -192,6 +270,11 @@ def parse_args() -> SFTConfig:
         "--target-modules",
         default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
     )
+    parser.add_argument(
+        "--attn-implementation",
+        choices=("eager", "sdpa", "flash_attention_2"),
+        default="sdpa",
+    )
     parser.add_argument("--no-gradient-checkpointing", action="store_true")
     parser.add_argument("--validation-fraction", type=float, default=0.05)
     parser.add_argument("--validation-group-column", default="pathway_family_id")
@@ -206,6 +289,8 @@ def parse_args() -> SFTConfig:
     values["gradient_checkpointing"] = not values.pop("no_gradient_checkpointing")
     if not 0 < values["answer_budget_fraction"] < 1:
         parser.error("--answer-budget-fraction must be between 0 and 1")
+    if values["dataloader_workers"] < 0:
+        parser.error("--dataloader-workers must be non-negative")
     return SFTConfig(**values)
 
 
@@ -263,23 +348,27 @@ def distributed_average(total: float, count: int, device: str, distributed: bool
 
 def validation_metrics(model: nn.Module, loader: DataLoader, device: str) -> dict[str, float | int]:
     model.eval()
-    total = 0.0
-    count = 0
+    loss_numerator = 0.0
+    supervised_tokens = input_tokens = 0
     prompt_dropped = answer_dropped = 0
     with torch.no_grad():
         for batch in loader:
+            batch_supervised_tokens = int((batch["labels"] != -100).sum().item())
             outputs = model(
-                input_ids=batch["input_ids"].to(device),
-                attention_mask=batch["attention_mask"].to(device),
-                labels=batch["labels"].to(device),
+                input_ids=batch["input_ids"].to(device, non_blocking=True),
+                attention_mask=batch["attention_mask"].to(device, non_blocking=True),
+                labels=batch["labels"].to(device, non_blocking=True),
                 use_cache=False,
             )
-            total += float(outputs.loss.item())
-            count += 1
+            loss_numerator += float(outputs.loss.item()) * batch_supervised_tokens
+            supervised_tokens += batch_supervised_tokens
+            input_tokens += int(batch["attention_mask"].sum().item())
             prompt_dropped += int(batch["prompt_tokens_dropped"])
             answer_dropped += int(batch["answer_tokens_dropped"])
     return {
-        "loss": total / max(count, 1),
+        "loss_numerator": loss_numerator,
+        "supervised_tokens": supervised_tokens,
+        "input_tokens": input_tokens,
         "prompt_tokens_dropped": prompt_dropped,
         "answer_tokens_dropped": answer_dropped,
     }
@@ -297,6 +386,39 @@ def train() -> None:
     is_main = local_rank == 0
     seed_everything(cfg.seed + local_rank, deterministic=cfg.deterministic)
     save_root = Path(cfg.save_dir)
+    release_root = Path(cfg.train_path).expanduser().resolve().parent
+    release_manifest_path = release_root / "dataset_manifest.json"
+    release_audit_path = release_root / "data_audit.json"
+    release_provenance: dict[str, Any] = {}
+    if release_manifest_path.is_file():
+        if not release_audit_path.is_file():
+            raise FileNotFoundError(
+                f"dataset manifest exists without immutable audit: {release_audit_path}"
+            )
+        release_manifest = json.loads(release_manifest_path.read_text(encoding="utf-8"))
+        release_audit = json.loads(release_audit_path.read_text(encoding="utf-8"))
+        build_id = release_manifest.get("dataset_build_id")
+        if not isinstance(build_id, str) or not re.fullmatch(r"dataset:[0-9a-f]{24}", build_id):
+            raise ValueError(f"invalid dataset_build_id in {release_manifest_path}")
+        if release_audit.get("status") != "passed" or release_audit.get("failures"):
+            raise ValueError(f"dataset audit did not pass: {release_audit_path}")
+        if stat.S_IMODE(release_audit_path.stat().st_mode) != 0o444:
+            raise PermissionError(f"dataset audit must be read-only 0444: {release_audit_path}")
+        expected_namespace = f"{release_root.name}_{build_id.split(':', 1)[1]}"
+        configured_namespace = os.environ.get("CHATPATHWAY_DATASET_NAMESPACE")
+        if configured_namespace and configured_namespace != expected_namespace:
+            raise ValueError(
+                "checkpoint dataset namespace disagrees with dataset_manifest.json: "
+                f"{configured_namespace!r} != {expected_namespace!r}"
+            )
+        release_provenance = {
+            "dataset_build_id": build_id,
+            "dataset_namespace": expected_namespace,
+            "dataset_manifest_path": str(release_manifest_path),
+            "dataset_manifest_sha256": file_sha256(release_manifest_path),
+            "data_audit_path": str(release_audit_path),
+            "data_audit_sha256": file_sha256(release_audit_path),
+        }
     logger = None
     if is_main:
         ensure_new_output_dir(save_root)
@@ -341,6 +463,7 @@ def train() -> None:
             "prefix_policy": cfg.prefix_policy,
             "seed": cfg.seed,
             "base_model_identity": base_model_identity(cfg.base_model),
+            **release_provenance,
         }
         if cfg.hash_inputs:
             manifest["train_sha256"] = file_sha256(cfg.train_path)
@@ -363,7 +486,12 @@ def train() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
-    base_model = AutoModelForCausalLM.from_pretrained(cfg.base_model, torch_dtype=dtype, trust_remote_code=True)
+    base_model = AutoModelForCausalLM.from_pretrained(
+        cfg.base_model,
+        torch_dtype=dtype,
+        trust_remote_code=True,
+        attn_implementation=cfg.attn_implementation,
+    )
     base_model.config.use_cache = False
     if cfg.gradient_checkpointing:
         base_model.gradient_checkpointing_enable()
@@ -384,7 +512,12 @@ def train() -> None:
     model.enable_input_require_grads()
     model.to(device)
     if distributed:
-        model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
+        model = DDP(
+            model,
+            device_ids=[local_rank],
+            find_unused_parameters=False,
+            broadcast_buffers=False,
+        )
 
     collate = make_collate_fn(tokenizer.pad_token_id)
     train_dataset = SFTDataset(
@@ -414,7 +547,24 @@ def train() -> None:
             "validation_prefix_selection=%s",
             json.dumps(manifest["validation_prefix_selection"], sort_keys=True),
         )
-    train_sampler = DistributedSampler(train_dataset, shuffle=True, seed=cfg.seed) if distributed else None
+    train_sampler = (
+        LengthGroupedDistributedSampler(
+            train_dataset,
+            num_replicas=dist.get_world_size(),
+            rank=local_rank,
+            batch_size=cfg.batch_size,
+            seed=cfg.seed,
+        )
+        if distributed
+        else None
+    )
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    loader_options: dict[str, Any] = {
+        "num_workers": cfg.dataloader_workers,
+        "pin_memory": device.startswith("cuda"),
+    }
+    if cfg.dataloader_workers:
+        loader_options["prefetch_factor"] = 2
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.batch_size,
@@ -422,12 +572,20 @@ def train() -> None:
         sampler=train_sampler,
         collate_fn=collate,
         generator=torch.Generator().manual_seed(cfg.seed),
+        **loader_options,
     )
+    validation_view: Dataset = validation_dataset
+    if distributed:
+        validation_view = Subset(
+            validation_dataset,
+            range(local_rank, len(validation_dataset), dist.get_world_size()),
+        )
     validation_loader = DataLoader(
-        validation_dataset,
+        validation_view,
         batch_size=cfg.batch_size,
         shuffle=False,
         collate_fn=collate,
+        **loader_options,
     )
     optimizer = optim.AdamW((parameter for parameter in model.parameters() if parameter.requires_grad), lr=cfg.lr)
     early_stopping = EarlyStopping(cfg.early_stopping_patience, cfg.early_stopping_min_delta)
@@ -458,9 +616,9 @@ def train() -> None:
             train_input_tokens += int(batch["attention_mask"].sum().item())
             train_supervised_tokens += int((batch["labels"] != -100).sum().item())
             outputs = model(
-                input_ids=batch["input_ids"].to(device),
-                attention_mask=batch["attention_mask"].to(device),
-                labels=batch["labels"].to(device),
+                input_ids=batch["input_ids"].to(device, non_blocking=True),
+                attention_mask=batch["attention_mask"].to(device, non_blocking=True),
+                labels=batch["labels"].to(device, non_blocking=True),
                 use_cache=False,
             )
             divisor = accumulation_divisor(step, len(train_loader), cfg.gradient_accumulation_steps)
@@ -494,29 +652,30 @@ def train() -> None:
             dist.all_reduce(elapsed, op=dist.ReduceOp.MAX)
             train_seconds = float(elapsed.item())
         validation_started = time.perf_counter()
+        validation = validation_metrics(unwrap_model(model), validation_loader, device)
+        value = torch.tensor(
+            [
+                validation["loss_numerator"],
+                validation["supervised_tokens"],
+                validation["input_tokens"],
+                validation["prompt_tokens_dropped"],
+                validation["answer_tokens_dropped"],
+            ],
+            dtype=torch.float64,
+            device=device,
+        )
         if distributed:
-            value = torch.zeros(3, dtype=torch.float64, device=device)
-            if is_main:
-                validation = validation_metrics(unwrap_model(model), validation_loader, device)
-                value[:] = torch.tensor(
-                    [
-                        validation["loss"],
-                        validation["prompt_tokens_dropped"],
-                        validation["answer_tokens_dropped"],
-                    ],
-                    dtype=torch.float64,
-                    device=device,
-                )
-            dist.broadcast(value, src=0)
-            val_avg = float(value[0].item())
-            val_prompt_dropped = int(value[1].item())
-            val_answer_dropped = int(value[2].item())
-        else:
-            validation = validation_metrics(model, validation_loader, device)
-            val_avg = float(validation["loss"])
-            val_prompt_dropped = int(validation["prompt_tokens_dropped"])
-            val_answer_dropped = int(validation["answer_tokens_dropped"])
+            dist.all_reduce(value, op=dist.ReduceOp.SUM)
+        val_avg = float((value[0] / value[1].clamp(min=1)).item())
+        val_supervised_tokens = int(value[1].item())
+        val_input_tokens = int(value[2].item())
+        val_prompt_dropped = int(value[3].item())
+        val_answer_dropped = int(value[4].item())
         validation_seconds = time.perf_counter() - validation_started
+        if distributed:
+            elapsed = torch.tensor(validation_seconds, dtype=torch.float64, device=device)
+            dist.all_reduce(elapsed, op=dist.ReduceOp.MAX)
+            validation_seconds = float(elapsed.item())
         record = {
             "epoch": epoch,
             "prefix_selection": prefix_selection,
@@ -532,6 +691,8 @@ def train() -> None:
             "train_supervised_tokens_per_second": float(train_counts[3].item())
             / max(train_seconds, 1e-9),
             "validation_seconds": validation_seconds,
+            "validation_input_tokens": val_input_tokens,
+            "validation_supervised_tokens": val_supervised_tokens,
             "validation_prompt_tokens_dropped": val_prompt_dropped,
             "validation_answer_tokens_dropped": val_answer_dropped,
             "lr": cfg.lr,

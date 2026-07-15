@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import runpy
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -13,6 +15,9 @@ from experiments.runtime_config import active_profile, asset_path
 
 
 DEFAULT_EXPERIMENT_SEED = "20260711"
+DEFAULT_DATASET_NAMESPACE = "pathway_v4_full"
+DATASET_NAMESPACE_ENV = "CHATPATHWAY_DATASET_NAMESPACE"
+DATASET_DIRECTORY_ENV = "CHATPATHWAY_DATASET_DIRECTORY"
 CONTROLLED_MAX_LENGTH = "8192"
 CONTROLLED_MAX_NEW_TOKENS = "4096"
 CONTROLLED_RETRY_MAX_NEW_TOKENS = "8192"
@@ -78,11 +83,41 @@ def experiment_seed() -> str:
     return DEFAULT_EXPERIMENT_SEED
 
 
+def dataset_namespace() -> str:
+    """Return the immutable dataset revision that scopes derived artifacts."""
+
+    configured = os.environ.get(DATASET_NAMESPACE_ENV)
+    if configured is not None:
+        value = configured.strip()
+    else:
+        dataset_directory = os.environ.get(
+            DATASET_DIRECTORY_ENV, "data/pathway_v4_full"
+        )
+        manifest_path = Path(asset_path(dataset_directory)) / "dataset_manifest.json"
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            build_id = manifest.get("dataset_build_id")
+            if not isinstance(build_id, str) or not re.fullmatch(
+                r"dataset:[0-9a-f]{24}", build_id
+            ):
+                raise ValueError(f"invalid dataset_build_id in {manifest_path}")
+            value = f"{manifest_path.parent.name}_{build_id.split(':', 1)[1]}"
+        else:
+            value = DEFAULT_DATASET_NAMESPACE
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", value) or value in {".", ".."}:
+        raise ValueError(
+            f"{DATASET_NAMESPACE_ENV} must be one filesystem-safe path component"
+        )
+    return value
+
+
 def seeded_asset_path(relative_path: str) -> str:
-    """Resolve a checkpoint/run path below ``<kind>/seeds/<seed>/``.
+    """Resolve an artifact below ``<kind>/datasets/<revision>/seeds/<seed>/``.
 
     Models and datasets are intentionally not accepted here: only mutable or
-    derived experiment artifacts should vary by replicate seed.
+    derived experiment artifacts should vary by dataset revision and replicate
+    seed.  This prevents a successful checkpoint from an older release from
+    satisfying a new release's scheduler dependency.
     """
 
     relative = Path(relative_path)
@@ -91,7 +126,16 @@ def seeded_asset_path(relative_path: str) -> str:
     kind, *rest = relative.parts
     if kind not in {"checkpoints", "runs", "artifacts"}:
         raise ValueError(f"Seed-scoped assets must be checkpoints/runs/artifacts, got {kind!r}")
-    return asset_path(str(Path(kind) / "seeds" / experiment_seed() / Path(*rest)))
+    return asset_path(
+        str(
+            Path(kind)
+            / "datasets"
+            / dataset_namespace()
+            / "seeds"
+            / experiment_seed()
+            / Path(*rest)
+        )
+    )
 
 
 def run_module(module: str, default_args: list[str] | None = None) -> None:

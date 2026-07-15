@@ -14,25 +14,25 @@
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv"
       ],
       "infer_requires": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/run_complete.json",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/run_complete.json"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/run_complete.json",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "runtime_notes": "Default manifest seed is 20260711. Train once per seed; CFFF uses four-process DDP for SFT and one GPU for AE."
     },
@@ -40,27 +40,27 @@
       "requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best"
       ],
       "train_requires": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.csv",
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp000_sft_only_direct/direct.progress.jsonl"
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp000_sft_only_direct/direct.csv",
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp000_sft_only_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Stage-1 direct baseline."
     },
@@ -70,31 +70,31 @@
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp003_stage2_sft_only_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.csv",
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.progress.jsonl"
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.csv",
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp003_stage2_sft_only_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Compute-matched stage-2 control: identical loop with all dynamics weights and dynamics LR zero."
     },
@@ -104,32 +104,32 @@
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv",
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.progress.jsonl"
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Direct-joint pure-HNN ablation with complete event-object targets and explicit graph-layer boundary increments."
     },
@@ -139,32 +139,32 @@
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv",
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.progress.jsonl"
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Direct-joint FDHNN ablation with event-substep targets; the staged primary row is exp021."
     },
@@ -173,31 +173,31 @@
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_manifest.json",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_manifest.json",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt"
       ],
       "runtime_notes": "One-GPU dynamics-only HNN job; run HNN and FDHNN or different seeds concurrently to occupy the node."
     },
@@ -207,36 +207,36 @@
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/direct.csv",
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/direct.progress.jsonl"
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Staged HNN control: requires E010 stability_passed, then one-GPU low-LR joint training with KL, warm-up, and gradient diagnostics."
     },
@@ -245,31 +245,31 @@
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
       ],
       "infer_requires": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_manifest.json",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_manifest.json",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt"
       ],
       "runtime_notes": "One-GPU dynamics-only FDHNN job; can run concurrently with E010 and other seeds."
     },
@@ -279,36 +279,36 @@
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "train_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
         "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
       ],
       "infer_requires": [
         "/root/autodl-tmp/models/qwen3_8B",
         "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
       ],
       "train_outputs": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
       ],
       "infer_artifacts": [
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
-        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
       ],
       "infer_outputs": [
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/direct.csv",
-        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/direct.progress.jsonl"
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/datasets/pathway_v4_full/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/direct.progress.jsonl"
       ],
       "runtime_notes": "Primary staged FDHNN row: requires E020 stability_passed, then one-GPU low-LR joint training with KL, warm-up, and gradient diagnostics."
     }

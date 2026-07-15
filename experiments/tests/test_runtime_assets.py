@@ -17,7 +17,9 @@ class RuntimeAssetOutputParentTests(unittest.TestCase):
         rows = {
             "base": {
                 "train_requires": ["/root/autodl-tmp/data/train.csv"],
-                "train_outputs": ["/root/autodl-tmp/checkpoints/seeds/20260711/base"],
+                "train_outputs": [
+                    "/root/autodl-tmp/checkpoints/datasets/pathway_v4_full/seeds/20260711/base"
+                ],
             },
             "dependent": {
                 "train_requires": ["base", "/root/autodl-tmp/models/model"],
@@ -37,7 +39,7 @@ class RuntimeAssetOutputParentTests(unittest.TestCase):
         )
         self.assertEqual(
             remapped["base"]["train_outputs"][0],
-            "/cfff/assets/checkpoints/seeds/20260711/base",
+            "/cfff/assets/checkpoints/datasets/pathway_v4_full/seeds/20260711/base",
         )
 
     def test_create_output_dirs_does_not_precreate_ae_checkpoint(self) -> None:
@@ -55,7 +57,10 @@ class RuntimeAssetOutputParentTests(unittest.TestCase):
                 create_output_dirs=True,
             )
 
-            ae_root = root / "checkpoints/seeds/20260711/shared/pathway_reconstruction_ae"
+            ae_root = (
+                root
+                / "checkpoints/datasets/pathway_v4_full/seeds/20260711/shared/pathway_reconstruction_ae"
+            )
             self.assertTrue(ae_root.is_dir())
             self.assertFalse((ae_root / "checkpoint_best").exists())
             self.assertTrue(all(record["ok"] for record in records))

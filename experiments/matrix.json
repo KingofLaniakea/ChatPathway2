@@ -54,7 +54,7 @@
     "selection": "explicit deterministic family-disjoint P0 validation CSV on seen organisms, reused by SFT, AE, and every stage-2 arm",
     "reason": "checkpoint selection measures unseen-family generalization without conflating it with the separate held-out-organism effect"
   },
-  "artifact_scope": "checkpoints/seeds/<seed>/... and runs/seeds/<seed>/...; within a seed all stage-2 arms reuse that seed's shared SFT and AE",
+  "artifact_scope": "checkpoints/datasets/<dataset_build>/seeds/<seed>/... and runs/datasets/<dataset_build>/seeds/<seed>/...; within a seed all stage-2 arms reuse that seed's shared SFT and AE",
   "axis_taxonomy": {
     "a_dynamics": {
       "a0_none": "No effective dynamics loss.",

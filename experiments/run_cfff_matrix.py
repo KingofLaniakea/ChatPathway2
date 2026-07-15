@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -41,7 +42,12 @@ from dataprocess.prompt_profiles import (
     SPECIES_NEUTRAL_IDS_NO_ORGANISM,
 )
 from dataprocess.source_hashes import verify_source_graph_hashes_tsv
-from experiments._launch import controlled_training_budget_args
+from experiments._launch import (
+    DATASET_DIRECTORY_ENV,
+    DATASET_NAMESPACE_ENV,
+    DEFAULT_DATASET_NAMESPACE,
+    controlled_training_budget_args,
+)
 from experiments.runtime_config import asset_root
 
 
@@ -59,6 +65,7 @@ DIRECT_STAGE2_IDS = (
 DATASET_DIRECTORY = Path("data/pathway_v4_full")
 EVALUATION_PARTITIONS = ("test", "test_organism", "test_strict")
 CONTROLLED_MAX_LENGTH = 8192
+DEFAULT_MAX_SFT_EPOCH_HOURS = 48.0
 
 STAGE2_RESOURCES = {experiment_id: 1 for experiment_id in DIRECT_STAGE2_IDS}
 STAGE2_ACCUMULATION_STEPS = {experiment_id: 12 for experiment_id in DIRECT_STAGE2_IDS}
@@ -66,6 +73,50 @@ STAGED_DEPENDENCY = {
     "exp011_hnn_reconae_pretrain_joint_direct": "exp010_hnn_reconae_dynamics_only",
     "exp021_forced_damped_hnn_reconae_pretrain_joint_direct": "exp020_forced_damped_hnn_reconae_dynamics_only",
 }
+
+
+def dataset_artifact_namespace(dataset_root: Path) -> str:
+    """Derive a filesystem-safe artifact namespace from the immutable build id."""
+
+    manifest_path = dataset_root / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    build_id = manifest.get("dataset_build_id")
+    if not isinstance(build_id, str) or not re.fullmatch(r"dataset:[0-9a-f]{24}", build_id):
+        raise ValueError(f"invalid v4 dataset_build_id in {manifest_path}")
+    root_name = dataset_root.name
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", root_name):
+        raise ValueError(f"dataset directory name is not namespace-safe: {root_name!r}")
+    return f"{root_name}_{build_id.split(':', 1)[1]}"
+
+
+def validate_sft_runtime_budget(dataset_root: Path, max_hours: float) -> float:
+    """Fail closed when the audited release exceeds the accepted SFT wall time."""
+
+    if max_hours <= 0:
+        raise ValueError("max_hours must be positive")
+    manifest_path = dataset_root / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runtime = manifest.get("runtime_estimate", {})
+    try:
+        estimate = float(runtime["estimated_one_epoch_hours"])
+        tokens_per_second = float(runtime["reference_four_a100_tokens_per_second"])
+        validation_ratio = float(runtime["conservative_validation_train_ratio"])
+        train_tokens = int(manifest["outputs"]["train"]["input_tokens"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"v4 manifest lacks a valid four-A100 runtime estimate: {manifest_path}") from exc
+    recomputed = train_tokens / tokens_per_second / 3600.0 * (1.0 + validation_ratio)
+    if abs(recomputed - estimate) > max(1e-6, estimate * 1e-9):
+        raise ValueError("v4 manifest runtime estimate is inconsistent with its token count")
+    if estimate > max_hours:
+        maximum_train_tokens = int(
+            max_hours * 3600.0 * tokens_per_second / (1.0 + validation_ratio)
+        )
+        raise ValueError(
+            f"audited SFT estimate {estimate:.2f}h exceeds {max_hours:.2f}h; "
+            f"rematerialize a separately audited release with at most "
+            f"{maximum_train_tokens} train input tokens"
+        )
+    return estimate
 
 
 @dataclass(frozen=True)
@@ -214,6 +265,8 @@ def build_jobs(
     root: Path,
     python: str,
     *,
+    dataset_directory: Path = DATASET_DIRECTORY,
+    dataset_namespace: str = DEFAULT_DATASET_NAMESPACE,
     inference_shards: int = 4,
     evaluation_partitions: Iterable[str] = EVALUATION_PARTITIONS,
 ) -> list[Job]:
@@ -229,7 +282,7 @@ def build_jobs(
         )
     jobs: list[Job] = []
     model = root / "models/qwen3_8B"
-    dataset_root = root / DATASET_DIRECTORY
+    dataset_root = root / dataset_directory
     csv_files = {
         partition: dataset_root / CSV_NAMES[partition]
         for partition in ALL_SPLITS
@@ -266,8 +319,8 @@ def build_jobs(
             )
 
     for seed in seeds:
-        seed_root = root / f"checkpoints/seeds/{seed}"
-        run_root = root / f"runs/seeds/{seed}/experiments"
+        seed_root = root / f"checkpoints/datasets/{dataset_namespace}/seeds/{seed}"
+        run_root = root / f"runs/datasets/{dataset_namespace}/seeds/{seed}/experiments"
         sft_root = seed_root / "shared/pathway_sft"
         ae_root = seed_root / "shared/pathway_reconstruction_ae"
         sft_key = f"{seed}:sft"
@@ -288,6 +341,8 @@ def build_jobs(
                     "-m",
                     "method.training.sft",
                     *controlled_training_budget_args(),
+                    "--dataloader-workers",
+                    "4",
                     "--gradient-accumulation-steps",
                     "1",
                     "--epochs",
@@ -366,7 +421,11 @@ def build_jobs(
                         "train",
                         experiment_id,
                         seed,
-                        ("--gradient-accumulation-steps", "12"),
+                        (
+                            "--gradient-accumulation-steps", "12",
+                            "--train", str(train),
+                            "--validation", str(validation),
+                        ),
                     ),
                     outputs=(
                         pretrain_root / "checkpoint_best/hamiltonian_dynamics.pt",
@@ -401,6 +460,10 @@ def build_jobs(
                         (
                             "--gradient-accumulation-steps",
                             str(STAGE2_ACCUMULATION_STEPS[experiment_id]),
+                            "--train",
+                            str(train),
+                            "--validation",
+                            str(validation),
                         ),
                     ),
                     outputs=(
@@ -443,6 +506,12 @@ def select_baseline_inference_jobs(jobs: Iterable[Job]) -> list[Job]:
     return selected
 
 
+def select_shared_sft_jobs(jobs: Iterable[Job]) -> list[Job]:
+    """Select only the four-GPU stage-1 SFT jobs, without inference or AE."""
+
+    return [job for job in jobs if job.key.endswith(":sft")]
+
+
 def command_string(command: tuple[str, ...]) -> str:
     import shlex
 
@@ -475,10 +544,10 @@ def outputs_complete(job: Job) -> bool:
     return artifact_set_complete(job.outputs) or artifact_set_complete(job.skip_if_outputs)
 
 
-def validate_inputs(root: Path) -> None:
+def validate_inputs(root: Path, dataset_directory: Path = DATASET_DIRECTORY) -> None:
     """Fail closed unless the complete immutable v4 release still matches disk."""
 
-    dataset_root = root / DATASET_DIRECTORY
+    dataset_root = root / dataset_directory
     csv_files = {
         split: dataset_root / CSV_NAMES[split] for split in ALL_SPLITS
     }
@@ -560,6 +629,8 @@ def validate_inputs(root: Path) -> None:
             raise ValueError(f"{split} must contain one unique record per accepted row")
         if manifest_split.get("rows") != rows:
             raise ValueError(f"{split} row count disagrees between manifest and audit")
+        if manifest_split.get("input_tokens") != audit_split.get("input_tokens"):
+            raise ValueError(f"{split} token count disagrees between manifest and audit")
         if manifest_split.get("csv_file") != CSV_NAMES[split]:
             raise ValueError(f"{split} manifest declares the wrong v4 CSV")
         if manifest_split.get("records_file") != RECORD_NAMES[split]:
@@ -677,6 +748,8 @@ def run_scheduler(
     poll_seconds: float,
     skip_existing: bool,
     dry_run: bool,
+    dataset_namespace: str = DEFAULT_DATASET_NAMESPACE,
+    dataset_directory: Path = DATASET_DIRECTORY,
 ) -> int:
     if len(gpus) != 4:
         raise ValueError("the maintained CFFF schedule requires exactly four GPU ids")
@@ -748,6 +821,8 @@ def run_scheduler(
                 env = os.environ.copy()
                 env["CHATPATHWAY_PROFILE"] = profile
                 env["CHATPATHWAY_NPROC_PER_NODE"] = str(job.resources)
+                env[DATASET_NAMESPACE_ENV] = dataset_namespace
+                env[DATASET_DIRECTORY_ENV] = str(dataset_directory)
                 env["CUDA_VISIBLE_DEVICES"] = ",".join(assigned)
                 process = subprocess.Popen(
                     job.command,
@@ -786,6 +861,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=parse_csv_ints, default=parse_csv_ints("20260711,20260712,20260713"))
     parser.add_argument("--gpus", type=parse_csv_strings, default=parse_csv_strings("0,1,2,3"))
     parser.add_argument("--profile", default="cfff")
+    parser.add_argument(
+        "--dataset-directory",
+        default=str(DATASET_DIRECTORY),
+        help="Dataset release path relative to the selected asset root.",
+    )
     parser.add_argument("--inference-shards", type=int, default=4)
     parser.add_argument(
         "--evaluation-partitions",
@@ -798,13 +878,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run only completed/shared SFT prerequisites and exp000 inference shards/merge.",
     )
+    parser.add_argument(
+        "--only-shared-sft",
+        action="store_true",
+        help="Run only the four-GPU shared stage-1 SFT job for each requested seed.",
+    )
     parser.add_argument("--log-dir")
     parser.add_argument("--poll-seconds", type=float, default=5.0)
+    parser.add_argument(
+        "--max-sft-epoch-hours",
+        type=float,
+        default=DEFAULT_MAX_SFT_EPOCH_HOURS,
+        help="Refuse to launch SFT when the immutable release estimate is above this wall time.",
+    )
     parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.poll_seconds <= 0:
         parser.error("--poll-seconds must be positive")
+    if args.max_sft_epoch_hours <= 0:
+        parser.error("--max-sft-epoch-hours must be positive")
     if not 1 <= args.inference_shards <= 4:
         parser.error("--inference-shards must be between 1 and 4")
     if not set(args.evaluation_partitions).issubset(EVALUATION_PARTITIONS):
@@ -812,6 +905,17 @@ def parse_args() -> argparse.Namespace:
             "--evaluation-partitions must contain only "
             + ", ".join(EVALUATION_PARTITIONS)
         )
+    dataset_directory = Path(args.dataset_directory)
+    if (
+        dataset_directory.is_absolute()
+        or ".." in dataset_directory.parts
+        or not dataset_directory.parts
+        or dataset_directory.parts[0] != "data"
+    ):
+        parser.error("--dataset-directory must be a relative path below data/")
+    args.dataset_directory = dataset_directory
+    if args.only_shared_sft and args.only_baseline_inference:
+        parser.error("--only-shared-sft and --only-baseline-inference are mutually exclusive")
     return args
 
 
@@ -819,17 +923,33 @@ def main() -> None:
     args = parse_args()
     root = asset_root(args.profile)
     if not args.dry_run:
-        validate_inputs(root)
+        validate_inputs(root, args.dataset_directory)
+    dataset_root = root / args.dataset_directory
+    if not args.dry_run:
+        validate_sft_runtime_budget(dataset_root, args.max_sft_epoch_hours)
+    dataset_namespace = (
+        dataset_artifact_namespace(dataset_root)
+        if (dataset_root / MANIFEST_NAME).is_file()
+        else args.dataset_directory.name
+    )
     jobs = build_jobs(
         args.seeds,
         root,
         sys.executable,
+        dataset_directory=args.dataset_directory,
+        dataset_namespace=dataset_namespace,
         inference_shards=args.inference_shards,
         evaluation_partitions=args.evaluation_partitions,
     )
     if args.only_baseline_inference:
         jobs = select_baseline_inference_jobs(jobs)
-    log_dir = Path(args.log_dir) if args.log_dir else root / "runs/cfff_matrix_scheduler"
+    if args.only_shared_sft:
+        jobs = select_shared_sft_jobs(jobs)
+    log_dir = (
+        Path(args.log_dir)
+        if args.log_dir
+        else root / f"runs/datasets/{dataset_namespace}/scheduler"
+    )
     raise SystemExit(
         run_scheduler(
             jobs,
@@ -839,6 +959,8 @@ def main() -> None:
             poll_seconds=args.poll_seconds,
             skip_existing=args.skip_existing,
             dry_run=args.dry_run,
+            dataset_namespace=dataset_namespace,
+            dataset_directory=args.dataset_directory,
         )
     )
 

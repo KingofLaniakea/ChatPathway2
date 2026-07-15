@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -46,6 +47,15 @@ def select_ids(all_ids: list[str], raw_ids: str | None) -> list[str]:
 
 def rewrite_asset_path(raw_path: str, manifest_root: str, asset_root: str | None) -> Path:
     expanded = os.path.expanduser(raw_path)
+    dataset_namespace = os.environ.get("CHATPATHWAY_DATASET_NAMESPACE")
+    if dataset_namespace:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", dataset_namespace):
+            raise ValueError("CHATPATHWAY_DATASET_NAMESPACE is not filesystem-safe")
+        expanded = re.sub(
+            r"/(checkpoints|runs|artifacts)/datasets/[^/]+/seeds/",
+            rf"/\1/datasets/{dataset_namespace}/seeds/",
+            expanded,
+        )
     seed = os.environ.get("CHATPATHWAY_EXPERIMENT_SEED")
     if seed:
         expanded = expanded.replace("/seeds/20260711/", f"/seeds/{seed}/")

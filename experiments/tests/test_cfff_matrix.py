@@ -30,10 +30,13 @@ from dataprocess.prompt_profiles import (
 from experiments.run_cfff_matrix import (
     Job,
     build_jobs,
+    dataset_artifact_namespace,
     outputs_complete,
     run_scheduler,
     select_baseline_inference_jobs,
+    select_shared_sft_jobs,
     validate_inputs,
+    validate_sft_runtime_budget,
 )
 
 
@@ -155,6 +158,7 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             }
         manifest_value = {
             "schema_version": RELEASE_SCHEMA_VERSION,
+            "dataset_build_id": "dataset:" + "a" * 24,
             "max_length": 8192,
             "primary_prompt_profile": PRIMARY_PROMPT_PROFILE,
             "processed_graph_root": str(graph_root),
@@ -171,6 +175,11 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
                 "bytes": source_hashes.stat().st_size,
             },
             "outputs": outputs,
+            "runtime_estimate": {
+                "reference_four_a100_tokens_per_second": 10.0,
+                "conservative_validation_train_ratio": 0.0,
+                "estimated_one_epoch_hours": 10 / 10 / 3600,
+            },
         }
         manifest = data / MANIFEST_NAME
         manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
@@ -274,6 +283,15 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "release artifact changed after audit"):
                 validate_inputs(root)
 
+    def test_runtime_budget_rejects_a_release_above_the_wall_time_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._release_fixture(root)
+            data = root / "data/pathway_v4_full"
+            self.assertAlmostEqual(validate_sft_runtime_budget(data, 1.0), 1 / 3600)
+            with self.assertRaisesRegex(ValueError, "rematerialize a separately audited release"):
+                validate_sft_runtime_budget(data, 0.0001)
+
     def test_runtime_preflight_rejects_audited_rows_over_8192_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -364,19 +382,19 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             sft_command[sft_command.index("--gradient-accumulation-steps") + 1],
             "1",
         )
-        self.assertIn(Path("/assets/checkpoints/seeds/11/shared/pathway_sft/run_complete.json"), by_key["11:sft"].outputs)
-        self.assertIn(Path("/assets/checkpoints/seeds/11/shared/pathway_reconstruction_ae/run_complete.json"), by_key["11:ae"].outputs)
+        self.assertIn(Path("/assets/checkpoints/datasets/pathway_v4_full/seeds/11/shared/pathway_sft/run_complete.json"), by_key["11:sft"].outputs)
+        self.assertIn(Path("/assets/checkpoints/datasets/pathway_v4_full/seeds/11/shared/pathway_reconstruction_ae/run_complete.json"), by_key["11:ae"].outputs)
         self.assertIn(
-            Path("/assets/checkpoints/seeds/11/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"),
+            Path("/assets/checkpoints/datasets/pathway_v4_full/seeds/11/experiments/exp001_hnn_reconae_joint_direct/final_lora/run_complete.json"),
             by_key["11:exp001_hnn_reconae_joint_direct:train"].outputs,
         )
         self.assertIn(
-            Path("/assets/runs/seeds/11/experiments/exp000_sft_only_direct/direct.progress.jsonl"),
+            Path("/assets/runs/datasets/pathway_v4_full/seeds/11/experiments/exp000_sft_only_direct/direct.progress.jsonl"),
             by_key["11:exp000:infer"].outputs,
         )
         self.assertIn(
             Path(
-                "/assets/runs/seeds/11/experiments/exp000_sft_only_direct/"
+                "/assets/runs/datasets/pathway_v4_full/seeds/11/experiments/exp000_sft_only_direct/"
                 "direct.progress.shard-00002-of-00004.jsonl"
             ),
             by_key["11:exp000:infer:shard2"].outputs,
@@ -392,7 +410,7 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
         )
         self.assertIn(
             Path(
-                "/assets/runs/seeds/11/experiments/exp000_sft_only_direct/"
+                "/assets/runs/datasets/pathway_v4_full/seeds/11/experiments/exp000_sft_only_direct/"
                 "diagnostics/test_strict/direct.csv"
             ),
             by_key["11:exp000:infer:test_strict"].outputs,
@@ -449,6 +467,57 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
         )
         for job in selected:
             self.assertTrue(set(job.dependencies).issubset(keys))
+
+    def test_shared_sft_only_selects_one_four_gpu_job_per_seed(self) -> None:
+        selected = select_shared_sft_jobs(
+            build_jobs([11, 12], Path("/assets"), "/python")
+        )
+        self.assertEqual([job.key for job in selected], ["11:sft", "12:sft"])
+        self.assertTrue(all(job.resources == 4 for job in selected))
+
+    def test_derived_release_is_forwarded_to_every_training_stage(self) -> None:
+        jobs = build_jobs(
+            [11],
+            Path("/assets"),
+            "/python",
+            dataset_directory=Path("data/pathway_v4_sft_48h"),
+            dataset_namespace="pathway_v4_sft_48h_build",
+        )
+        by_key = {job.key: job for job in jobs}
+        expected_train = "/assets/data/pathway_v4_sft_48h/train_pathway_continuation_v4.csv"
+        expected_validation = (
+            "/assets/data/pathway_v4_sft_48h/validation_pathway_continuation_v4.csv"
+        )
+        for key in (
+            "11:sft",
+            "11:ae",
+            "11:exp010_hnn_reconae_dynamics_only:train",
+            "11:exp021_forced_damped_hnn_reconae_pretrain_joint_direct:train",
+        ):
+            command = by_key[key].command
+            self.assertEqual(command[command.index("--train") + 1], expected_train)
+            self.assertEqual(
+                command[command.index("--validation") + 1], expected_validation
+            )
+        self.assertIn(
+            Path(
+                "/assets/checkpoints/datasets/pathway_v4_sft_48h_build/"
+                "seeds/11/shared/pathway_sft/run_complete.json"
+            ),
+            by_key["11:sft"].outputs,
+        )
+
+    def test_dataset_artifact_namespace_uses_immutable_build_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / MANIFEST_NAME).write_text(
+                json.dumps({"dataset_build_id": "dataset:" + "a" * 24}),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                dataset_artifact_namespace(root),
+                f"{root.name}_{'a' * 24}",
+            )
 
     def test_scheduler_allocates_four_gpu_sft_then_single_gpu_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
