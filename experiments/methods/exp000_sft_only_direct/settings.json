@@ -3,7 +3,7 @@
   "a_dynamics": "a0_none",
   "b_ae": "none",
   "d_training_schedule": "d0_stage1_sft",
-  "c_inference": "c0_direct_lora",
+  "c_inference": "c1_direct_lora",
   "status": "runnable_baseline",
   "method_train_entrypoints": [
     "experiments.artifact_check"

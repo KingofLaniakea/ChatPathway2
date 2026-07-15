@@ -1,8 +1,8 @@
 {
   "title": "Compute-matched stage-2 SFT only plus direct inference",
   "a_dynamics": "a0_none",
-  "b_ae": "b0_reconstruction_ae_shared",
+  "b_ae": "b1_reconstruction_mse_shared",
   "d_training_schedule": "d1_stage2_sft_control",
-  "c_inference": "c0_direct_lora",
+  "c_inference": "c1_direct_lora",
   "status": "runnable_control"
 }

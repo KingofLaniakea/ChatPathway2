@@ -1,10 +1,10 @@
 {
-  "title": "Pure HNN + shared reconstruction AE + joint second LoRA + direct inference",
+  "title": "Pure HNN direct-joint stage-2 ablation",
   "a_dynamics": "a1_hnn_orthogonal_poisson",
-  "b_ae": "b0_reconstruction_ae_shared",
-  "d_training_schedule": "d2_stage2_joint_dynamics",
-  "c_inference": "c0_direct_lora",
-  "status": "runnable_core_control",
+  "b_ae": "b1_reconstruction_mse_shared",
+  "d_training_schedule": "d4_direct_joint",
+  "c_inference": "c1_direct_lora",
+  "status": "runnable_direct_joint_ablation",
   "method_train_entrypoints": [
     "method.training.framework_a"
   ],

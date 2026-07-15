@@ -43,12 +43,18 @@ from method.training.prefix_sampling import (
     PREFIX_POLICIES,
     PREFIX_SAMPLING_MODES,
 )
+from method.training.staged_objectives import (
+    DYNAMICS_RESOLUTIONS,
+    flatten_span_groups,
+    multiscale_time_points,
+    scale_gradient,
+)
 
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
 DEFAULT_SFT = "/root/autodl-tmp/checkpoints/shared/pathway_sft/checkpoint_best"
 DEFAULT_AE = "/root/autodl-tmp/checkpoints/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
-DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
+DEFAULT_TRAIN = "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv"
 DEFAULT_SAVE = "/root/autodl-tmp/checkpoints/hamiltonian_joint"
 
 
@@ -76,12 +82,21 @@ class TrainConfig:
     prefix_policy: str
     max_dynamics_steps: int
     dynamics_dt: float
+    dynamics_resolution: str
+    substep_dt: float
     lambda_align: float
     lambda_state: float
     lambda_latent_state: float
     lambda_structure: float
     lambda_force: float
     lambda_damping: float
+    dynamics_init_checkpoint: str | None
+    dynamics_init_run_complete: str | None
+    require_pretrained_dynamics: bool
+    dynamics_to_lora_warmup_fraction: float
+    kl_weight: float
+    kl_max_tokens: int
+    gradient_conflict_interval: int
     validation_fraction: float
     validation_group_column: str
     early_stopping_patience: int
@@ -107,17 +122,17 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--damping-mode", choices=DAMPING_MODES, default="isotropic")
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--latent-dim", type=int, default=128)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=12)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--dynamics-lr", "--hnn-lr", dest="dynamics_lr", type=float, default=2e-4)
-    parser.add_argument("--epochs", type=int, default=12)
-    parser.add_argument("--max-length", type=int, default=1072)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--max-length", type=int, default=8192)
     parser.add_argument("--answer-budget-fraction", type=float, default=0.5)
     parser.add_argument(
         "--prefix-sampling",
         choices=PREFIX_SAMPLING_MODES,
-        default="all_rows",
+        default="one_per_record",
     )
     parser.add_argument(
         "--prefix-policy",
@@ -127,8 +142,8 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--max-dynamics-steps",
         type=int,
-        default=128,
-        help="Maximum ordered graph-layer transitions; longer targets are reported and truncated.",
+        default=512,
+        help="Maximum complete event-object advances; longer targets are reported and truncated.",
     )
     parser.add_argument(
         "--dynamics-dt",
@@ -136,14 +151,37 @@ def parse_args() -> TrainConfig:
         default=1.0 / 128.0,
         help="Fixed batch-independent surrogate-time increment per graph layer.",
     )
+    parser.add_argument(
+        "--dynamics-resolution",
+        choices=DYNAMICS_RESOLUTIONS,
+        default="substep_multiscale",
+    )
+    parser.add_argument(
+        "--substep-dt",
+        type=float,
+        default=1.0 / 512.0,
+        help="Fast within-layer increment for substep_multiscale trajectories.",
+    )
     parser.add_argument("--lambda-align", type=float, default=0.5)
     parser.add_argument("--lambda-state", type=float, default=0.5)
     parser.add_argument("--lambda-latent-state", type=float, default=0.1)
     parser.add_argument("--lambda-structure", type=float, default=1e-4)
     parser.add_argument("--lambda-force", type=float, default=1e-4)
     parser.add_argument("--lambda-damping", type=float, default=1e-3)
+    parser.add_argument("--dynamics-init-checkpoint")
+    parser.add_argument("--dynamics-init-run-complete")
+    parser.add_argument("--require-pretrained-dynamics", action="store_true")
+    parser.add_argument(
+        "--dynamics-to-lora-warmup-fraction",
+        type=float,
+        default=0.0,
+        help="Warm only the dynamics gradient routed into LoRA; dynamics itself receives full gradients.",
+    )
+    parser.add_argument("--kl-weight", type=float, default=0.0)
+    parser.add_argument("--kl-max-tokens", type=int, default=256)
+    parser.add_argument("--gradient-conflict-interval", type=int, default=0)
     parser.add_argument("--validation-fraction", type=float, default=0.05)
-    parser.add_argument("--validation-group-column", default="source_json")
+    parser.add_argument("--validation-group-column", default="pathway_family_id")
     parser.add_argument("--early-stopping-patience", type=int, default=3)
     parser.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=20260711)
@@ -157,6 +195,25 @@ def parse_args() -> TrainConfig:
         parser.error("--max-dynamics-steps must be positive")
     if args.dynamics_dt <= 0:
         parser.error("--dynamics-dt must be positive")
+    if args.substep_dt <= 0 or args.substep_dt >= args.dynamics_dt:
+        parser.error("--substep-dt must be positive and smaller than --dynamics-dt")
+    if not 0.0 <= args.dynamics_to_lora_warmup_fraction <= 1.0:
+        parser.error("--dynamics-to-lora-warmup-fraction must be in [0, 1]")
+    if args.kl_weight < 0:
+        parser.error("--kl-weight must be non-negative")
+    if args.kl_max_tokens < 1:
+        parser.error("--kl-max-tokens must be positive")
+    if args.gradient_conflict_interval < 0:
+        parser.error("--gradient-conflict-interval must be non-negative")
+    if args.require_pretrained_dynamics and (
+        not args.dynamics_init_checkpoint or not args.dynamics_init_run_complete
+    ):
+        parser.error(
+            "--require-pretrained-dynamics needs both --dynamics-init-checkpoint "
+            "and --dynamics-init-run-complete"
+        )
+    if args.dynamics_init_run_complete and not args.dynamics_init_checkpoint:
+        parser.error("--dynamics-init-run-complete needs --dynamics-init-checkpoint")
     if not 0 < args.answer_budget_fraction < 1:
         parser.error("--answer-budget-fraction must be between 0 and 1")
     values = vars(args)
@@ -322,16 +379,110 @@ def fixed_time_grid(cfg: TrainConfig, device: str) -> torch.Tensor:
     ) * cfg.dynamics_dt
 
 
+def supervised_logit_positions(labels: torch.Tensor, maximum: int) -> torch.Tensor:
+    """Select logits that predict supervised assistant tokens.
+
+    Causal-LM logits at position ``t`` predict the label at ``t+1``.  The
+    returned ``[batch, position]`` indices therefore shift every supervised
+    label position left by one and sample deterministically when capped.
+    """
+
+    if maximum < 1:
+        raise ValueError("maximum supervised KL positions must be positive")
+    label_positions = torch.nonzero(labels != -100, as_tuple=False)
+    label_positions = label_positions[label_positions[:, 1] > 0]
+    if label_positions.numel() == 0:
+        return torch.empty((0, 2), dtype=torch.long, device=labels.device)
+    positions = label_positions.clone()
+    positions[:, 1] -= 1
+    if positions.size(0) <= maximum:
+        return positions
+    selected = torch.linspace(
+        0,
+        positions.size(0) - 1,
+        steps=maximum,
+        device=positions.device,
+    ).round().long()
+    return positions[selected]
+
+
+def select_logits(logits: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+    if positions.ndim != 2 or positions.size(-1) != 2:
+        raise ValueError("logit positions must have shape [N, 2]")
+    if positions.numel() == 0:
+        return logits.new_empty((0, logits.size(-1)))
+    return logits[positions[:, 0], positions[:, 1]]
+
+
+def stage1_reference_kl(
+    current_logits: torch.Tensor,
+    reference_logits: torch.Tensor | None,
+    positions: torch.Tensor | None,
+) -> torch.Tensor:
+    if reference_logits is None or positions is None or positions.numel() == 0:
+        return current_logits.new_zeros(())
+    current = select_logits(current_logits, positions).float()
+    reference = reference_logits.to(device=current.device, dtype=torch.float32)
+    if current.shape != reference.shape:
+        raise ValueError("current/reference KL logits have different shapes")
+    reference_probability = nn.functional.softmax(reference, dim=-1)
+    return nn.functional.kl_div(
+        nn.functional.log_softmax(current, dim=-1),
+        reference_probability,
+        reduction="batchmean",
+    )
+
+
+def load_pretrained_dynamics(
+    dynamics: LatentHamiltonianDynamics,
+    checkpoint: str,
+    *,
+    run_complete: str | None,
+    require_stability: bool,
+) -> dict[str, Any]:
+    path = Path(checkpoint)
+    raw = torch.load(path, map_location="cpu")
+    if not isinstance(raw, dict) or not isinstance(raw.get("model_state_dict"), dict):
+        raise ValueError("pretrained dynamics checkpoint has no model_state_dict")
+    config = raw.get("dynamics_config", {})
+    expected = dynamics.export_config()
+    for key in ("latent_dim", "variant", "structure_mode", "damping_mode"):
+        if config.get(key) != expected.get(key):
+            raise ValueError(
+                f"pretrained dynamics {key}={config.get(key)!r} does not match {expected.get(key)!r}"
+            )
+    status_path = Path(run_complete) if run_complete else path.parent.parent / "run_complete.json"
+    if status_path.resolve().parent != path.resolve().parent.parent:
+        raise ValueError("dynamics checkpoint and run_complete marker are not from the same run")
+    status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else {}
+    if require_stability and (
+        status.get("status") != "completed" or status.get("stability_passed") is not True
+    ):
+        raise RuntimeError(
+            "dynamics pretraining did not pass the registered stability gate: "
+            f"{status_path}"
+        )
+    dynamics.load_state_dict(unwrap_state_dict(raw["model_state_dict"]))
+    return {
+        "checkpoint": str(path.resolve()),
+        "run_complete": str(status_path.resolve()),
+        "pretrain_status": status,
+    }
+
+
 def batch_losses(
     *,
     model: nn.Module,
     projection: CascadeProjection,
     dynamics: LatentHamiltonianDynamics,
-    batch: dict[str, torch.Tensor],
+    batch: dict[str, Any],
     cfg: TrainConfig,
     device: str,
     training: bool,
     time_grid: torch.Tensor,
+    dynamics_to_lora_scale: float = 1.0,
+    reference_logits: torch.Tensor | None = None,
+    kl_positions: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor | int]:
     inputs = batch["input_ids"].to(device)
     attention_mask = batch["attention_mask"].to(device)
@@ -346,8 +497,15 @@ def batch_losses(
             use_cache=False,
         )
         loss_sft = outputs.loss
-        hidden = outputs.hidden_states[-1]
-        latent, _ = projection(hidden.float())
+        loss_kl = stage1_reference_kl(outputs.logits, reference_logits, kl_positions)
+        hidden = outputs.hidden_states[-1].float()
+        # Forward values are identical for every scale.  Only the auxiliary
+        # gradient returning to LoRA is warmed; dynamics parameters always see
+        # the full objective from the first optimizer step.
+        dynamics_hidden = scale_gradient(hidden, dynamics_to_lora_scale)
+        latent, _ = projection(dynamics_hidden)
+
+    loss_sft_regularized = loss_sft + cfg.kl_weight * loss_kl
 
     answer_mask = labels != -100
     first_answer = answer_mask.to(torch.int64).argmax(dim=1)
@@ -360,12 +518,18 @@ def batch_losses(
     if not valid_indices:
         zero = loss_sft.new_zeros(())
         return {
-            "total": loss_sft,
+            "total": loss_sft_regularized,
             "sft": loss_sft,
+            "kl": loss_kl,
+            "sft_regularized": loss_sft_regularized,
+            "dynamics": zero,
             "align": zero,
             "state": zero,
             "latent_state": zero,
             "regularization": zero,
+            "dynamics_valid_samples": 0,
+            "dynamics_layer_boundaries": 0,
+            "dynamics_truncated_substeps": 0,
             "dynamics_truncated_samples": 0,
             "dynamics_truncated_semantic_steps": 0,
             "text_truncated_substeps": int(batch["substeps_total"]) - int(batch["substeps_retained"]),
@@ -374,50 +538,94 @@ def batch_losses(
             "answer_tokens_dropped": int(batch["answer_tokens_dropped"]),
         }
 
-    valid_tensor = torch.tensor(valid_indices, dtype=torch.long, device=hidden.device)
-    z0 = latent[valid_tensor, last_prompt[valid_tensor]]
-    maximum_used_steps = max(
-        min(len(batch["step_span_groups"][index]), cfg.max_dynamics_steps)
-        for index in valid_indices
-    )
-    trajectory = odeint(
-        dynamics,
-        z0.float(),
-        time_grid[: maximum_used_steps + 1],
-        method="rk4",
-    ).transpose(0, 1)
-    predicted_hidden = projection.up(trajectory)
-
     velocity_similarities: list[torch.Tensor] = []
     state_similarities: list[torch.Tensor] = []
     latent_state_losses: list[torch.Tensor] = []
     dynamics_truncated_samples = 0
     dynamics_truncated_semantic_steps = 0
+    dynamics_truncated_substeps = 0
+    dynamics_layer_boundaries = 0
+    regularization_times: list[torch.Tensor] = []
+    regularization_states: list[torch.Tensor] = []
+
+    if cfg.dynamics_resolution == "graph_layer":
+        valid_tensor = torch.tensor(valid_indices, dtype=torch.long, device=hidden.device)
+        z0_batch = latent[valid_tensor, last_prompt[valid_tensor]]
+        maximum_used_steps = max(
+            min(len(batch["step_span_groups"][index]), cfg.max_dynamics_steps)
+            for index in valid_indices
+        )
+        batch_trajectory = odeint(
+            dynamics,
+            z0_batch.float(),
+            time_grid[: maximum_used_steps + 1],
+            method="rk4",
+        ).transpose(0, 1)
+        batch_predicted_hidden = projection.up(batch_trajectory)
+        regularization_times.append(time_grid[: maximum_used_steps + 1])
+        regularization_states.append(z0_batch)
+
     for local_index, batch_index in enumerate(valid_indices):
         groups = batch["step_span_groups"][batch_index]
-        raw_length = len(groups)
-        used_length = min(raw_length, cfg.max_dynamics_steps)
-        if raw_length > used_length:
-            dynamics_truncated_samples += 1
-            dynamics_truncated_semantic_steps += raw_length - used_length
-        # Targets come from the stage-1-initialized language representation.
-        # Stop gradients through this branch so the auxiliary loss cannot make
-        # its own target move toward the dynamics prediction in the same step;
-        # LoRA is updated through CE and the prompt-anchor rollout path.
-        target_states = torch.stack([
-            torch.cat([
-                hidden[batch_index, int(start) : int(end)].float()
-                for start, end in group.to(hidden.device).tolist()
-            ], dim=0).mean(dim=0).detach()
-            for group in groups[:used_length]
-        ])
-        generated_states = predicted_hidden[local_index, 1 : used_length + 1]
+        if cfg.dynamics_resolution == "graph_layer":
+            raw_length = len(groups)
+            used_length = min(raw_length, cfg.max_dynamics_steps)
+            if raw_length > used_length:
+                dynamics_truncated_samples += 1
+                dynamics_truncated_semantic_steps += raw_length - used_length
+            target_states = torch.stack([
+                torch.cat([
+                    hidden[batch_index, int(start) : int(end)]
+                    for start, end in group.to(hidden.device).tolist()
+                ], dim=0).mean(dim=0).detach()
+                for group in groups[:used_length]
+            ])
+            trajectory = batch_trajectory[local_index, : used_length + 1]
+            generated_states = batch_predicted_hidden[local_index, 1 : used_length + 1]
+            dynamics_layer_boundaries += used_length
+        else:
+            spans, layer_indices, raw_length = flatten_span_groups(
+                groups,
+                maximum_events=cfg.max_dynamics_steps,
+            )
+            used_length = len(spans)
+            if not spans:
+                continue
+            if raw_length > used_length:
+                dynamics_truncated_samples += 1
+                dynamics_truncated_substeps += raw_length - used_length
+            target_states = torch.stack([
+                hidden[batch_index, start:end].mean(dim=0).detach()
+                for start, end in spans
+            ])
+            sample_times = multiscale_time_points(
+                layer_indices,
+                layer_dt=cfg.dynamics_dt,
+                substep_dt=cfg.substep_dt,
+                device=hidden.device,
+            )
+            sample_z0 = latent[batch_index, last_prompt[batch_index]].unsqueeze(0)
+            trajectory = odeint(
+                dynamics,
+                sample_z0.float(),
+                sample_times,
+                method="rk4",
+            ).squeeze(1)
+            generated_states = projection.up(trajectory[1:])
+            regularization_times.append(sample_times)
+            regularization_states.append(sample_z0)
+            dynamics_layer_boundaries += sum(
+                1
+                for position, layer_index in enumerate(layer_indices)
+                if position == 0 or layer_index != layer_indices[position - 1]
+            )
+
         generated_velocity = (
-            predicted_hidden[local_index, 1 : used_length + 1]
-            - predicted_hidden[local_index, :used_length]
+            projection.up(trajectory[1 : used_length + 1])
+            - projection.up(trajectory[:used_length])
         )
         target_sequence = torch.cat(
-            [hidden[batch_index, last_prompt[batch_index]].float().unsqueeze(0), target_states],
+            [hidden[batch_index, last_prompt[batch_index]].detach().unsqueeze(0), target_states],
             dim=0,
         )
         target_velocity = target_sequence[1:] - target_sequence[:-1]
@@ -430,35 +638,64 @@ def batch_losses(
         target_latent_states = projection.down(target_states)
         latent_state_losses.append(
             nn.functional.smooth_l1_loss(
-                trajectory[local_index, 1 : used_length + 1],
+                trajectory[1 : used_length + 1],
                 target_latent_states,
             )
         )
+
+    if not velocity_similarities:
+        zero = loss_sft.new_zeros(())
+        return {
+            "total": loss_sft_regularized,
+            "sft": loss_sft,
+            "kl": loss_kl,
+            "sft_regularized": loss_sft_regularized,
+            "dynamics": zero,
+            "align": zero,
+            "state": zero,
+            "latent_state": zero,
+            "regularization": zero,
+            "dynamics_valid_samples": 0,
+            "dynamics_layer_boundaries": 0,
+            "dynamics_truncated_substeps": dynamics_truncated_substeps,
+            "dynamics_truncated_samples": dynamics_truncated_samples,
+            "dynamics_truncated_semantic_steps": dynamics_truncated_semantic_steps,
+            "text_truncated_substeps": int(batch["substeps_total"]) - int(batch["substeps_retained"]),
+            "text_truncated_semantic_steps": int(batch["semantic_steps_total"]) - int(batch["semantic_steps_retained"]),
+            "prompt_tokens_dropped": int(batch["prompt_tokens_dropped"]),
+            "answer_tokens_dropped": int(batch["answer_tokens_dropped"]),
+        }
 
     loss_align = 1.0 - torch.stack(velocity_similarities).mean()
     loss_state = 1.0 - torch.stack(state_similarities).mean()
     loss_latent_state = torch.stack(latent_state_losses).mean()
     loss_regularization = dynamics.regularization_loss(
-        time_grid[: maximum_used_steps + 1],
-        z0,
+        torch.cat(regularization_times),
+        torch.cat(regularization_states, dim=0),
         lambda_structure=cfg.lambda_structure,
         lambda_force=cfg.lambda_force,
         lambda_damping=cfg.lambda_damping,
     )
-    total = (
-        loss_sft
-        + cfg.lambda_align * loss_align
+    loss_dynamics = (
+        cfg.lambda_align * loss_align
         + cfg.lambda_state * loss_state
         + cfg.lambda_latent_state * loss_latent_state
         + loss_regularization
     )
+    total = loss_sft_regularized + loss_dynamics
     return {
         "total": total,
         "sft": loss_sft,
+        "kl": loss_kl,
+        "sft_regularized": loss_sft_regularized,
+        "dynamics": loss_dynamics,
         "align": loss_align,
         "state": loss_state,
         "latent_state": loss_latent_state,
         "regularization": loss_regularization,
+        "dynamics_valid_samples": len(velocity_similarities),
+        "dynamics_layer_boundaries": dynamics_layer_boundaries,
+        "dynamics_truncated_substeps": dynamics_truncated_substeps,
         "dynamics_truncated_samples": dynamics_truncated_samples,
         "dynamics_truncated_semantic_steps": dynamics_truncated_semantic_steps,
         "text_truncated_substeps": int(batch["substeps_total"]) - int(batch["substeps_retained"]),
@@ -545,6 +782,21 @@ def save_checkpoint(
 
 def train(cfg: TrainConfig | None = None) -> None:
     cfg = cfg or parse_args()
+    if (
+        cfg.dynamics_init_checkpoint
+        or cfg.require_pretrained_dynamics
+        or cfg.dynamics_to_lora_warmup_fraction > 0
+        or cfg.kl_weight > 0
+        or cfg.gradient_conflict_interval > 0
+        or cfg.dynamics_resolution != "graph_layer"
+    ):
+        # Keep one implementation of the staged objective and checkpoint
+        # contract.  The distributed entry point also handles world_size=1,
+        # which is the maintained task-parallel configuration for HNN/FDHNN.
+        from method.training.framework_a_ddp import train as train_staged
+
+        train_staged(cfg)
+        return
     seed_everything(cfg.seed, deterministic=cfg.deterministic)
     save_root = ensure_new_output_dir(cfg.save_dir)
     logger = configure_logger(save_root / "train.log", f"framework_a.{cfg.variant}")

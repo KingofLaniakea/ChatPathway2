@@ -1,0 +1,8 @@
+{
+  "title": "Pure HNN dynamics-only pretraining in fixed SFT+AE latent space",
+  "a_dynamics": "a1_hnn_orthogonal_poisson",
+  "b_ae": "b1_reconstruction_mse_shared",
+  "d_training_schedule": "d2_dynamics_only",
+  "c_inference": "c0_trajectory_stability",
+  "status": "runnable_core_pretrain"
+}

@@ -90,6 +90,35 @@ def pathway_step_substep_texts(answer_json: str) -> tuple[tuple[str, ...], ...]:
     return tuple(groups)
 
 
+def pathway_layer_event_objects(
+    answer_json: str,
+) -> tuple[tuple[dict[str, Any], ...], ...]:
+    """Return complete structured events grouped by graph layer.
+
+    The v4 target serializes one biological relation/reaction as one event
+    object.  Dynamics should encode that whole object (participants, action,
+    mediators, target, and text), not only the human-readable ``text`` field.
+    Legacy targets have no stable event-object contract and therefore return
+    an empty tuple so callers can fall back to text spans.
+    """
+
+    try:
+        payload = json.loads(answer_json)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(payload, dict) or not isinstance(payload.get("remaining_layers"), list):
+        return ()
+    groups: list[tuple[dict[str, Any], ...]] = []
+    for layer in payload["remaining_layers"]:
+        if not isinstance(layer, dict) or not isinstance(layer.get("events"), list):
+            return ()
+        events = tuple(event for event in layer["events"] if isinstance(event, dict))
+        if not events or len(events) != len(layer["events"]):
+            return ()
+        groups.append(events)
+    return tuple(groups)
+
+
 def _find_substep_char_spans(
     answer_json: str,
     groups: tuple[tuple[str, ...], ...],
@@ -104,6 +133,38 @@ def _find_substep_char_spans(
             if start < 0:
                 continue
             end = start + len(escaped)
+            spans.append((start, end))
+            cursor = end
+        span_groups.append(spans)
+    return span_groups
+
+
+def _find_event_char_spans(
+    answer_json: str,
+    groups: tuple[tuple[dict[str, Any], ...], ...],
+) -> list[list[tuple[int, int]]] | None:
+    """Locate complete compact event objects in an audited v4 answer.
+
+    Production v4 answers use sorted, compact JSON.  Returning ``None`` on any
+    mismatch is deliberate: historical pretty-printed targets then use the
+    conservative text-only alignment rather than a guessed object boundary.
+    """
+
+    span_groups: list[list[tuple[int, int]]] = []
+    cursor = 0
+    for events in groups:
+        spans: list[tuple[int, int]] = []
+        for event in events:
+            serialized = json.dumps(
+                event,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            start = answer_json.find(serialized, cursor)
+            if start < 0:
+                return None
+            end = start + len(serialized)
             spans.append((start, end))
             cursor = end
         span_groups.append(spans)
@@ -194,7 +255,17 @@ def encode_supervised(
         kept_answer = answer_ids[:remaining_budget]
 
     text_groups = pathway_step_substep_texts(answer_json)
-    char_groups = _find_substep_char_spans(answer_json, text_groups)
+    event_groups = pathway_layer_event_objects(answer_json)
+    event_char_groups = (
+        _find_event_char_spans(answer_json, event_groups)
+        if event_groups and tuple(map(len, event_groups)) == tuple(map(len, text_groups))
+        else None
+    )
+    char_groups = (
+        event_char_groups
+        if event_char_groups is not None
+        else _find_substep_char_spans(answer_json, text_groups)
+    )
     answer_groups = [
         _token_spans(tokenizer, answer_text, answer_ids, char_group, offsets)
         for char_group in char_groups
@@ -226,6 +297,7 @@ __all__ = [
     "EncodedSupervision",
     "IncompleteSupervisionError",
     "encode_supervised",
+    "pathway_layer_event_objects",
     "pathway_step_substep_texts",
     "trim_prompt_ids",
 ]

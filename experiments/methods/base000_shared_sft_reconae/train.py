@@ -14,6 +14,7 @@ if __name__ == "__main__":
             "torchrun:method.training.sft",
             [
                 *controlled_training_budget_args(),
+                "--epochs", "1",
                 "--base-model", asset_path("models/qwen3_8B"),
                 "--train", asset_path("data/pathway_v4_full/train_pathway_continuation_v4.csv"),
                 "--validation", asset_path("data/pathway_v4_full/validation_pathway_continuation_v4.csv"),
@@ -24,11 +25,13 @@ if __name__ == "__main__":
             "method.training.latent_ae",
             [
                 *controlled_training_budget_args(),
+                "--epochs", "3",
                 "--base-model", asset_path("models/qwen3_8B"),
                 "--sft-lora", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best"),
                 "--train", asset_path("data/pathway_v4_full/train_pathway_continuation_v4.csv"),
                 "--validation", asset_path("data/pathway_v4_full/validation_pathway_continuation_v4.csv"),
                 "--save-dir", seeded_asset_path("checkpoints/shared/pathway_reconstruction_ae"),
+                "--cosine-weight", "0",
             ],
         ),
     ])

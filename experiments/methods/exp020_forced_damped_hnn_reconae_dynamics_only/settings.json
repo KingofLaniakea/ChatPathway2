@@ -1,0 +1,8 @@
+{
+  "title": "Forced/damped HNN dynamics-only pretraining in fixed SFT+AE latent space",
+  "a_dynamics": "a2_forced_damped_hnn",
+  "b_ae": "b1_reconstruction_mse_shared",
+  "d_training_schedule": "d2_dynamics_only",
+  "c_inference": "c0_trajectory_stability",
+  "status": "runnable_core_pretrain_primary"
+}

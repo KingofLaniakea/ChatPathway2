@@ -131,7 +131,7 @@
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.csv",
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp001_hnn_reconae_joint_direct/direct.progress.jsonl"
       ],
-      "runtime_notes": "Pure HNN with orthogonal Poisson structure and graph-layer/set targets."
+      "runtime_notes": "Direct-joint pure-HNN ablation with complete event-object targets and explicit graph-layer boundary increments."
     },
     "exp002_forced_damped_hnn_reconae_joint_direct": {
       "requires": [
@@ -166,7 +166,151 @@
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.csv",
         "/root/autodl-tmp/runs/seeds/20260711/experiments/exp002_forced_damped_hnn_reconae_joint_direct/direct.progress.jsonl"
       ],
-      "runtime_notes": "Primary row: (J-rI) grad H + F(t), orthogonal Poisson J, isotropic PSD damping, direct inference."
+      "runtime_notes": "Direct-joint FDHNN ablation with event-substep targets; the staged primary row is exp021."
+    },
+    "exp010_hnn_reconae_dynamics_only": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_manifest.json",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt"
+      ],
+      "runtime_notes": "One-GPU dynamics-only HNN job; run HNN and FDHNN or different seeds concurrently to occupy the node."
+    },
+    "exp011_hnn_reconae_pretrain_joint_direct": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp010_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp011_hnn_reconae_pretrain_joint_direct/direct.progress.jsonl"
+      ],
+      "runtime_notes": "Staged HNN control: requires E010 stability_passed, then one-GPU low-LR joint training with KL, warm-up, and gradient diagnostics."
+    },
+    "exp020_forced_damped_hnn_reconae_dynamics_only": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_manifest.json",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt"
+      ],
+      "runtime_notes": "One-GPU dynamics-only FDHNN job; can run concurrently with E010 and other seeds."
+    },
+    "exp021_forced_damped_hnn_reconae_pretrain_joint_direct": {
+      "requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "train_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/data/pathway_v4_full/validation_pathway_continuation_v4.csv",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_sft/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/shared/pathway_reconstruction_ae/checkpoint_best/ae_proj.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp020_forced_damped_hnn_reconae_dynamics_only/dynamics_pretrain/run_complete.json"
+      ],
+      "infer_requires": [
+        "/root/autodl-tmp/models/qwen3_8B",
+        "/root/autodl-tmp/data/pathway_v4_full/test_pathway_continuation_v4.csv"
+      ],
+      "train_outputs": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best/hamiltonian_dynamics.pt",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+      ],
+      "infer_artifacts": [
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/checkpoint_best",
+        "/root/autodl-tmp/checkpoints/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/final_lora/run_complete.json"
+      ],
+      "infer_outputs": [
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/direct.csv",
+        "/root/autodl-tmp/runs/seeds/20260711/experiments/exp021_forced_damped_hnn_reconae_pretrain_joint_direct/direct.progress.jsonl"
+      ],
+      "runtime_notes": "Primary staged FDHNN row: requires E020 stability_passed, then one-GPU low-LR joint training with KL, warm-up, and gradient diagnostics."
     }
   },
   "storage_plan": {

@@ -2,11 +2,10 @@
 """Dependency-aware four-GPU scheduler for the maintained CFFF matrix.
 
 Stage-1 SFT is a real four-process DDP job and the shared AE remains a single-GPU
-prerequisite.  The primary forced/damped HNN then receives all four GPUs; after
-it completes, pure HNN and the compute-matched stage-2 SFT control each receive
-two GPUs concurrently.  Per-process gradient accumulation is adjusted so all
-stage-2 arms retain an effective global batch of 12 examples per optimizer
-update.  Each direct-inference job is split into deterministic strided shards,
+prerequisite.  HNN/FDHNN dynamics-only and stage-2 jobs intentionally use one
+process each so independent variants/seeds can occupy all four GPUs concurrently
+and gradient-conflict diagnostics remain exact.  Each direct-inference job is
+split into deterministic strided shards,
 followed by a verified merge that restores source order and rejects gaps,
 duplicates, or provenance drift.
 """
@@ -46,7 +45,13 @@ from experiments._launch import controlled_training_budget_args
 from experiments.runtime_config import asset_root
 
 
-STAGE2_IDS = (
+PRETRAIN_IDS = (
+    "exp010_hnn_reconae_dynamics_only",
+    "exp020_forced_damped_hnn_reconae_dynamics_only",
+)
+DIRECT_STAGE2_IDS = (
+    "exp021_forced_damped_hnn_reconae_pretrain_joint_direct",
+    "exp011_hnn_reconae_pretrain_joint_direct",
     "exp002_forced_damped_hnn_reconae_joint_direct",
     "exp001_hnn_reconae_joint_direct",
     "exp003_stage2_sft_only_direct",
@@ -55,15 +60,11 @@ DATASET_DIRECTORY = Path("data/pathway_v4_full")
 EVALUATION_PARTITIONS = ("test", "test_organism", "test_strict")
 CONTROLLED_MAX_LENGTH = 8192
 
-STAGE2_RESOURCES = {
-    "exp002_forced_damped_hnn_reconae_joint_direct": 4,
-    "exp001_hnn_reconae_joint_direct": 2,
-    "exp003_stage2_sft_only_direct": 2,
-}
-
-STAGE2_ACCUMULATION_STEPS = {
-    experiment_id: 12 // resources
-    for experiment_id, resources in STAGE2_RESOURCES.items()
+STAGE2_RESOURCES = {experiment_id: 1 for experiment_id in DIRECT_STAGE2_IDS}
+STAGE2_ACCUMULATION_STEPS = {experiment_id: 12 for experiment_id in DIRECT_STAGE2_IDS}
+STAGED_DEPENDENCY = {
+    "exp011_hnn_reconae_pretrain_joint_direct": "exp010_hnn_reconae_dynamics_only",
+    "exp021_forced_damped_hnn_reconae_pretrain_joint_direct": "exp020_forced_damped_hnn_reconae_dynamics_only",
 }
 
 
@@ -289,6 +290,8 @@ def build_jobs(
                     *controlled_training_budget_args(),
                     "--gradient-accumulation-steps",
                     "1",
+                    "--epochs",
+                    "1",
                     "--base-model",
                     str(model),
                     "--train",
@@ -318,6 +321,8 @@ def build_jobs(
                     "-m",
                     "method.training.latent_ae",
                     *controlled_training_budget_args(),
+                    "--epochs",
+                    "3",
                     "--base-model",
                     str(model),
                     "--sft-lora",
@@ -347,17 +352,47 @@ def build_jobs(
             run_directory=run_root / "exp000_sft_only_direct",
         )
 
-        for experiment_id in STAGE2_IDS:
+        for experiment_id in PRETRAIN_IDS:
+            train_key = f"{seed}:{experiment_id}:train"
+            pretrain_root = seed_root / f"experiments/{experiment_id}/dynamics_pretrain"
+            jobs.append(
+                Job(
+                    key=train_key,
+                    seed=seed,
+                    resources=1,
+                    dependencies=(ae_key,),
+                    command=experiment_command(
+                        python,
+                        "train",
+                        experiment_id,
+                        seed,
+                        ("--gradient-accumulation-steps", "12"),
+                    ),
+                    outputs=(
+                        pretrain_root / "checkpoint_best/hamiltonian_dynamics.pt",
+                        pretrain_root / "run_manifest.json",
+                        pretrain_root / "run_complete.json",
+                    ),
+                )
+            )
+
+        for experiment_id in DIRECT_STAGE2_IDS:
             train_key = f"{seed}:{experiment_id}:train"
             infer_key = f"{seed}:{experiment_id}:infer"
             checkpoint = seed_root / f"experiments/{experiment_id}/final_lora/checkpoint_best"
             resources = STAGE2_RESOURCES[experiment_id]
+            prerequisite = STAGED_DEPENDENCY.get(experiment_id)
+            dependencies = (
+                (f"{seed}:{prerequisite}:train",)
+                if prerequisite is not None
+                else (ae_key,)
+            )
             jobs.append(
                 Job(
                     key=train_key,
                     seed=seed,
                     resources=resources,
-                    dependencies=(ae_key,),
+                    dependencies=dependencies,
                     command=experiment_command(
                         python,
                         "train",
@@ -414,11 +449,30 @@ def command_string(command: tuple[str, ...]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+def artifact_set_complete(paths: tuple[Path, ...]) -> bool:
+    """Require both files and an explicit successful terminal marker.
+
+    A failed dynamics pretraining run deliberately leaves its diagnostics and
+    ``run_complete.json`` on disk.  Existence alone must never turn that
+    scientifically rejected run into a satisfied scheduler dependency.
+    """
+
+    if not paths or not all(path.exists() for path in paths):
+        return False
+    for path in paths:
+        if path.name != "run_complete.json":
+            continue
+        try:
+            terminal = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if terminal.get("status") != "completed":
+            return False
+    return True
+
+
 def outputs_complete(job: Job) -> bool:
-    return (
-        (bool(job.outputs) and all(path.exists() for path in job.outputs))
-        or (bool(job.skip_if_outputs) and all(path.exists() for path in job.skip_if_outputs))
-    )
+    return artifact_set_complete(job.outputs) or artifact_set_complete(job.skip_if_outputs)
 
 
 def validate_inputs(root: Path) -> None:

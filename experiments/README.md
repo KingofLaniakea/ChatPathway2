@@ -1,6 +1,6 @@
 # Controlled experiment matrix
 
-`matrix.json` contains five executable rows. They are intentionally narrow so
+`matrix.json` contains nine executable rows. They are intentionally narrow so
 the first result can be attributed.
 
 | Row | Role |
@@ -8,8 +8,12 @@ the first result can be attributed.
 | `base000_shared_sft_reconae` | train one shared stage-1 SFT and one shared AE for a seed |
 | `exp000_sft_only_direct` | stage-1 direct-generation baseline |
 | `exp003_stage2_sft_only_direct` | compute-matched second-SFT control with every dynamics weight and LR zero |
-| `exp001_hnn_reconae_joint_direct` | stage-2 SFT plus `J grad H` |
-| `exp002_forced_damped_hnn_reconae_joint_direct` | primary stage-2 SFT plus `(J-rI) grad H + F(t)` |
+| `exp010_hnn_reconae_dynamics_only` | frozen-SFT/AE HNN pretraining with a validation stability gate |
+| `exp011_hnn_reconae_pretrain_joint_direct` | stable HNN then low-LR regularized stage-2 SFT |
+| `exp020_forced_damped_hnn_reconae_dynamics_only` | frozen-SFT/AE FDHNN pretraining with a validation stability gate |
+| `exp021_forced_damped_hnn_reconae_pretrain_joint_direct` | stable FDHNN then low-LR regularized stage-2 SFT; primary method |
+| `exp001_hnn_reconae_joint_direct` | random HNN direct-joint D4 ablation |
+| `exp002_forced_damped_hnn_reconae_joint_direct` | random FDHNN direct-joint D4 ablation |
 
 The active release contract is `data/pathway_v4_full/`. The three primary
 partitions use disjoint complete five-digit KEGG families on seen source codes;
@@ -28,15 +32,27 @@ checkpoints/seeds/<seed>/experiments/<row>/...
 runs/seeds/<seed>/experiments/<row>/...
 ```
 
-Within one seed, `exp003`, `exp001`, and `exp002` reuse exactly that seed's
+Within one seed, every D1--D4 row reuses exactly that seed's
 shared SFT and AE. Recommended seeds are `20260711`, `20260712`, and
 `20260713`.
+
+The B1 AE baseline is pure reconstruction MSE. Optional B2 next-layer
+prediction and B3 latent mean/variance/off-diagonal-covariance losses are
+implemented but are not silently enabled in these nine rows. Dynamics targets
+pool the contextual tokens of each complete event object (participants, action,
+mediators, target, and text). Within-layer canonical events use `dt=1/512`; a
+new graph layer uses `dt=1/128`. Neither value has a biological time unit.
 
 The controlled matrix pins `max_length=8192` and per-process training
 `batch_size=1` for SFT, AE, and every stage-2 arm. Dataset materialization uses
 the real tokenizer and excludes any row whose complete prompt plus closed JSON
 answer exceeds that budget. Trainers fail if an oversized row slips through;
 they never truncate an assistant JSON target.
+
+The formal default is one full-data stage-1 SFT epoch, followed by at most
+three AE epochs, one to three dynamics-only epochs, and at most three stage-2
+epochs. This prevents the underlying trainers' historical 12-epoch defaults
+from silently turning a 515-million-token release into an unintended run.
 
 The formal v4 release contains exactly one seed-fixed prefix per selected
 biological record. A global constrained matcher balances the actually eligible
@@ -94,21 +110,27 @@ SEED=20260711
 
 python -m experiments.run_experiment train base000_shared_sft_reconae -- --seed "$SEED"
 python -m experiments.run_experiment train exp003_stage2_sft_only_direct -- --seed "$SEED"
+python -m experiments.run_experiment train exp010_hnn_reconae_dynamics_only -- --seed "$SEED"
+python -m experiments.run_experiment train exp011_hnn_reconae_pretrain_joint_direct -- --seed "$SEED"
+python -m experiments.run_experiment train exp020_forced_damped_hnn_reconae_dynamics_only -- --seed "$SEED"
+python -m experiments.run_experiment train exp021_forced_damped_hnn_reconae_pretrain_joint_direct -- --seed "$SEED"
 python -m experiments.run_experiment train exp001_hnn_reconae_joint_direct -- --seed "$SEED"
 python -m experiments.run_experiment train exp002_forced_damped_hnn_reconae_joint_direct -- --seed "$SEED"
 
 python -m experiments.run_experiment infer exp000_sft_only_direct -- --seed "$SEED"
 python -m experiments.run_experiment infer exp003_stage2_sft_only_direct -- --seed "$SEED"
+python -m experiments.run_experiment infer exp011_hnn_reconae_pretrain_joint_direct -- --seed "$SEED"
+python -m experiments.run_experiment infer exp021_forced_damped_hnn_reconae_pretrain_joint_direct -- --seed "$SEED"
 python -m experiments.run_experiment infer exp001_hnn_reconae_joint_direct -- --seed "$SEED"
 python -m experiments.run_experiment infer exp002_forced_damped_hnn_reconae_joint_direct -- --seed "$SEED"
 ```
 
 ## Four-A100 CFFF schedule
 
-The shared SFT is a four-process DDP job. The primary forced/damped HNN stage
-uses four processes; pure HNN and the stage-2 SFT control use two processes
-each and run concurrently. AE uses one GPU while dependency-ready inference
-shards can occupy the others. Direct inference uses four independent model
+The shared SFT is a four-process DDP job. AE, HNN/FDHNN pretraining, D3 joint
+training, D4 ablations, and the SFT-only control each use one process so
+independent methods and seeds can run concurrently across the four GPUs. This
+keeps the exact LoRA gradient-conflict diagnostic well-defined. Direct inference uses four independent model
 replicas on mutually exclusive strided input shards; this is data-parallel
 evaluation, not model parallelism. Run the dependency-aware scheduler:
 
@@ -129,8 +151,8 @@ python -m experiments.run_cfff_matrix \
 ```
 
 Across three seeds it runs each shared SFT with all four GPUs, then fills the
-node with AE, the four-GPU primary stage, the concurrent two-plus-two control
-stages, and inference shards as their dependencies become available. The merge rejects a
+node with dependency-ready single-GPU AE/D2/D3/D4 jobs and inference shards.
+The merge rejects a
 missing or duplicate dataset index, changed source field, mismatched shard run
 configuration, or progress hash before creating canonical outputs. Completed
 outputs are skipped on restart only when the trainer's atomic
@@ -159,12 +181,13 @@ Direct greedy inference is the only active inference mode in the current
 Hamiltonian matrix. The following generation studies are explicitly retained
 for the next research phase; they have not been deleted:
 
-- graph-layer-by-graph-layer generation after a validated JSON layer-boundary
-  controller exists;
+- event-by-event generation with layer-dependent step sizes after a validated
+  JSON event-boundary controller exists;
+- graph-layer-by-graph-layer generation as a separate controller comparison;
 - token-by-token generation after training a separate token-resolution dynamics
-  objective; the graph-layer checkpoint must not be advanced once per token;
-- a multiscale hybrid of the two controllers, ablated against direct greedy
+  objective; the event/layer checkpoint must not be advanced once per token;
+- a generation-time multiscale hybrid of the controllers, ablated against direct greedy
   generation under matched decoding budgets.
 
-All three must compare biological validity, JSON validity, long-horizon error,
+All four must compare biological validity, JSON validity, long-horizon error,
 and compute. PHNN likewise waits for a real port/control contract.

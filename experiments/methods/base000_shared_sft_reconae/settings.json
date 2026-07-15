@@ -1,7 +1,7 @@
 {
   "title": "Shared SFT and reconstruction AE prerequisites",
   "a_dynamics": "a0_none",
-  "b_ae": "b0_reconstruction_ae_shared",
+  "b_ae": "b1_reconstruction_mse_shared",
   "d_training_schedule": "shared_prerequisite",
   "c_inference": "artifact_check",
   "status": "runnable_shared_prerequisite"

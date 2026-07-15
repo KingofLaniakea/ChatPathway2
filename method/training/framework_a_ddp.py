@@ -54,11 +54,18 @@ from method.training.framework_a import (
     TrainConfig,
     batch_losses,
     fixed_time_grid,
+    load_pretrained_dynamics,
     load_frames,
     make_collate_fn,
     parse_args,
     save_checkpoint,
+    select_logits,
+    supervised_logit_positions,
     unwrap_state_dict,
+)
+from method.training.staged_objectives import (
+    gradient_conflict_statistics,
+    linear_warmup_scale,
 )
 
 
@@ -68,8 +75,21 @@ def _format_manifest_log_value(value: Any) -> str:
     return json.dumps(value, sort_keys=True)
 
 
-LOSS_KEYS = ("total", "sft", "align", "state", "latent_state", "regularization")
+LOSS_KEYS = (
+    "total",
+    "sft",
+    "kl",
+    "sft_regularized",
+    "dynamics",
+    "align",
+    "state",
+    "latent_state",
+    "regularization",
+)
 COUNTER_KEYS = (
+    "dynamics_valid_samples",
+    "dynamics_layer_boundaries",
+    "dynamics_truncated_substeps",
     "dynamics_truncated_samples",
     "dynamics_truncated_semantic_steps",
     "text_truncated_substeps",
@@ -323,6 +343,52 @@ def _reduce_metrics(
     }
 
 
+def _snapshot_trainable_parameters(model: nn.Module) -> dict[str, torch.Tensor]:
+    """Freeze the exact stage-1 LoRA values for output-space KL."""
+
+    return {
+        name: parameter.detach().clone()
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    }
+
+
+def _reference_logits_for_batch(
+    model: nn.Module,
+    reference_parameters: dict[str, torch.Tensor],
+    batch: dict[str, Any],
+    *,
+    cfg: TrainConfig,
+    device: str,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    if cfg.kl_weight <= 0:
+        return None, None
+    labels = batch["labels"].to(device)
+    positions = supervised_logit_positions(labels, cfg.kl_max_tokens)
+    if positions.numel() == 0:
+        return positions, None
+    raw_model = unwrap_ddp(model)
+    was_training = raw_model.training
+    raw_model.eval()
+    try:
+        with torch.no_grad():
+            outputs = torch.func.functional_call(
+                raw_model,
+                reference_parameters,
+                (),
+                {
+                    "input_ids": batch["input_ids"].to(device),
+                    "attention_mask": batch["attention_mask"].to(device),
+                    "use_cache": False,
+                },
+                strict=False,
+            )
+            selected = select_logits(outputs.logits, positions).detach().float()
+    finally:
+        raw_model.train(was_training)
+    return positions, selected
+
+
 def evaluate_distributed(
     *,
     model: nn.Module,
@@ -333,6 +399,7 @@ def evaluate_distributed(
     device: str,
     time_grid: torch.Tensor,
     distributed: bool,
+    reference_parameters: dict[str, torch.Tensor] | None = None,
 ) -> dict[str, float | int]:
     model.eval()
     dynamics.eval()
@@ -340,6 +407,13 @@ def evaluate_distributed(
     counters = {key: 0 for key in COUNTER_KEYS}
     examples = 0
     for batch in loader:
+        positions, reference_logits = _reference_logits_for_batch(
+            model,
+            reference_parameters or {},
+            batch,
+            cfg=cfg,
+            device=device,
+        )
         losses = batch_losses(
             model=model,
             projection=projection,
@@ -349,6 +423,9 @@ def evaluate_distributed(
             device=device,
             training=False,
             time_grid=time_grid,
+            dynamics_to_lora_scale=1.0,
+            reference_logits=reference_logits,
+            kl_positions=positions,
         )
         batch_examples = int(batch["input_ids"].shape[0])
         for key in LOSS_KEYS:
@@ -377,6 +454,11 @@ def train(cfg: TrainConfig | None = None) -> None:
     distributed, rank, local_rank, world_size, device = distributed_environment(cfg)
     cfg = replace(cfg, device=device)
     is_main = rank == 0
+    if distributed and cfg.gradient_conflict_interval > 0:
+        raise RuntimeError(
+            "gradient-conflict diagnostics currently require one process per run; "
+            "use task-parallel HNN/FDHNN runs across the four GPUs"
+        )
     seed_everything(cfg.seed + rank, deterministic=cfg.deterministic)
     save_root = Path(cfg.save_dir)
 
@@ -431,6 +513,27 @@ def train(cfg: TrainConfig | None = None) -> None:
                 "base_model_identity": base_model_identity(cfg.base_model),
                 "sft_adapter_sha256": artifact_sha256(cfg.sft_lora),
                 "ae_checkpoint_sha256": artifact_sha256(cfg.ae_checkpoint),
+                "dynamics_resolution": cfg.dynamics_resolution,
+                "dynamics_init_checkpoint": (
+                    str(Path(cfg.dynamics_init_checkpoint).resolve())
+                    if cfg.dynamics_init_checkpoint
+                    else None
+                ),
+                "dynamics_init_sha256": (
+                    artifact_sha256(cfg.dynamics_init_checkpoint)
+                    if cfg.dynamics_init_checkpoint
+                    else None
+                ),
+                "dynamics_init_run_complete": (
+                    str(Path(cfg.dynamics_init_run_complete).resolve())
+                    if cfg.dynamics_init_run_complete
+                    else None
+                ),
+                "dynamics_init_run_complete_sha256": (
+                    file_sha256(cfg.dynamics_init_run_complete)
+                    if cfg.dynamics_init_run_complete
+                    else None
+                ),
                 "runtime": {
                     "python": platform.python_version(),
                     "torch": str(torch.__version__),
@@ -506,6 +609,11 @@ def train(cfg: TrainConfig | None = None) -> None:
         )
         model.enable_input_require_grads()  # type: ignore[attr-defined]
         model.to(device)
+        reference_parameters = (
+            _snapshot_trainable_parameters(model)
+            if cfg.kl_weight > 0
+            else {}
+        )
 
         projection = CascadeProjection(
             high_dim=base_model.config.hidden_size,
@@ -524,6 +632,17 @@ def train(cfg: TrainConfig | None = None) -> None:
             structure_mode=cfg.structure_mode,
             damping_mode=cfg.damping_mode,
         ).to(device).float()
+        pretrain_metadata: dict[str, Any] | None = None
+        if cfg.dynamics_init_checkpoint:
+            pretrain_metadata = load_pretrained_dynamics(
+                dynamics,
+                cfg.dynamics_init_checkpoint,
+                run_complete=cfg.dynamics_init_run_complete,
+                require_stability=cfg.require_pretrained_dynamics,
+            )
+            if is_main:
+                manifest["dynamics_pretraining"] = pretrain_metadata
+                write_json(save_root / "run_manifest.json", manifest)
         _broadcast_module(dynamics, distributed=distributed)
         # Variant-specific modules consume different amounts of random state.
         # Reset after construction so matched HNN/FDHNN/SFT-control arms use
@@ -606,12 +725,18 @@ def train(cfg: TrainConfig | None = None) -> None:
             collate_fn=collate,
         )
         time_grid = fixed_time_grid(cfg, device)
-        early_stopping = EarlyStopping(
+        composite_stopping = EarlyStopping(
             cfg.early_stopping_patience,
             cfg.early_stopping_min_delta,
         )
+        best_sft = EarlyStopping(0, 0.0)
+        best_dynamics = EarlyStopping(0, 0.0)
         history: list[dict[str, Any]] = []
         stopped_early = False
+        optimizer_step = 0
+        total_optimizer_steps = cfg.epochs * math.ceil(
+            len(train_loader) / cfg.gradient_accumulation_steps
+        )
         optimizer.zero_grad(set_to_none=True)
 
         for epoch in range(1, cfg.epochs + 1):
@@ -637,12 +762,25 @@ def train(cfg: TrainConfig | None = None) -> None:
             sums = {key: 0.0 for key in LOSS_KEYS}
             counters = {key: 0 for key in COUNTER_KEYS}
             examples = 0
+            gradient_conflicts: list[dict[str, float]] = []
             progress = tqdm(
                 train_loader,
                 desc=f"{cfg.variant} DDP epoch {epoch}",
                 disable=not is_main,
             )
             for step, batch in enumerate(progress):
+                dynamics_to_lora_scale = linear_warmup_scale(
+                    optimizer_step,
+                    total_optimizer_steps,
+                    cfg.dynamics_to_lora_warmup_fraction,
+                )
+                positions, reference_logits = _reference_logits_for_batch(
+                    model,
+                    reference_parameters,
+                    batch,
+                    cfg=cfg,
+                    device=device,
+                )
                 group_end = (
                     (step + 1) % cfg.gradient_accumulation_steps == 0
                     or step + 1 == len(train_loader)
@@ -662,7 +800,42 @@ def train(cfg: TrainConfig | None = None) -> None:
                         device=device,
                         training=True,
                         time_grid=time_grid,
+                        dynamics_to_lora_scale=dynamics_to_lora_scale,
+                        reference_logits=reference_logits,
+                        kl_positions=positions,
                     )
+                    should_measure_conflict = (
+                        cfg.gradient_conflict_interval > 0
+                        and optimizer_step > 0
+                        and optimizer_step % cfg.gradient_conflict_interval == 0
+                        and step % cfg.gradient_accumulation_steps == 0
+                        and dynamics_to_lora_scale > 0
+                    )
+                    if should_measure_conflict:
+                        stats = gradient_conflict_statistics(
+                            losses["sft"],  # type: ignore[arg-type]
+                            losses["dynamics"],  # type: ignore[arg-type]
+                            (
+                                parameter
+                                for parameter in unwrap_ddp(model).parameters()
+                                if parameter.requires_grad
+                            ),
+                            dynamics_gradient_scale=dynamics_to_lora_scale,
+                        )
+                        stats.update({
+                            "optimizer_step": float(optimizer_step),
+                            "dynamics_to_lora_scale": dynamics_to_lora_scale,
+                        })
+                        gradient_conflicts.append(stats)
+                        if is_main:
+                            append_jsonl(
+                                save_root / "gradient_conflict.jsonl",
+                                {
+                                    "epoch": epoch,
+                                    "batch_step": step,
+                                    **stats,
+                                },
+                            )
                     divisor = accumulation_divisor(
                         step,
                         len(train_loader),
@@ -690,10 +863,12 @@ def train(cfg: TrainConfig | None = None) -> None:
                     nn.utils.clip_grad_norm_(dynamics.parameters(), 1.0)
                     optimizer.step()
                     optimizer.zero_grad(set_to_none=True)
+                    optimizer_step += 1
                 if is_main:
                     progress.set_postfix(
                         sft=f"{float(losses['sft'].detach().item()):.3f}",  # type: ignore[union-attr]
                         align=f"{float(losses['align'].detach().item()):.3f}",  # type: ignore[union-attr]
+                        dyn_to_lora=f"{dynamics_to_lora_scale:.2f}",
                     )
 
             dynamics_rank_disagreement = maximum_parameter_rank_disagreement(
@@ -728,6 +903,23 @@ def train(cfg: TrainConfig | None = None) -> None:
             train_metrics["supervised_tokens_per_second"] = float(
                 train_metrics["supervised_tokens"]
             ) / max(train_seconds, 1e-9)
+            train_metrics["dynamics_to_lora_scale_end"] = linear_warmup_scale(
+                optimizer_step,
+                total_optimizer_steps,
+                cfg.dynamics_to_lora_warmup_fraction,
+            )
+            train_metrics["gradient_conflict_measurements"] = len(gradient_conflicts)
+            train_metrics["gradient_conflict_negative_fraction"] = (
+                sum(record["cosine"] < 0 for record in gradient_conflicts)
+                / len(gradient_conflicts)
+                if gradient_conflicts
+                else 0.0
+            )
+            train_metrics["gradient_conflict_mean_cosine"] = (
+                sum(record["cosine"] for record in gradient_conflicts) / len(gradient_conflicts)
+                if gradient_conflicts
+                else 0.0
+            )
             validation_started = time.perf_counter()
             validation_metrics = evaluate_distributed(
                 model=unwrap_ddp(model),
@@ -738,6 +930,7 @@ def train(cfg: TrainConfig | None = None) -> None:
                 device=device,
                 time_grid=time_grid,
                 distributed=distributed,
+                reference_parameters=reference_parameters,
             )
             validation_seconds_value = torch.tensor(
                 time.perf_counter() - validation_started,
@@ -758,7 +951,15 @@ def train(cfg: TrainConfig | None = None) -> None:
                 "effective_global_batch_size": effective_global_batch_size(cfg, world_size),
                 "dynamics_max_rank_disagreement": dynamics_rank_disagreement,
             }
-            improved, should_stop = early_stopping.update(
+            improved_sft, _ = best_sft.update(
+                float(validation_metrics["sft"]),
+                epoch,
+            )
+            improved_dynamics, _ = best_dynamics.update(
+                float(validation_metrics["dynamics"]),
+                epoch,
+            )
+            improved_composite, should_stop = composite_stopping.update(
                 float(validation_metrics["total"]),
                 epoch,
             )
@@ -790,7 +991,41 @@ def train(cfg: TrainConfig | None = None) -> None:
                     epoch=epoch,
                     metrics=record,
                 )
-                if improved:
+                save_checkpoint(
+                    destination=save_root / "checkpoint_last",
+                    model=raw_model,
+                    dynamics=dynamics,
+                    cfg=cfg,
+                    epoch=epoch,
+                    metrics=record,
+                )
+                if improved_sft:
+                    save_checkpoint(
+                        destination=save_root / "checkpoint_best_sft",
+                        model=raw_model,
+                        dynamics=dynamics,
+                        cfg=cfg,
+                        epoch=epoch,
+                        metrics=record,
+                    )
+                if improved_dynamics:
+                    save_checkpoint(
+                        destination=save_root / "checkpoint_best_dynamics",
+                        model=raw_model,
+                        dynamics=dynamics,
+                        cfg=cfg,
+                        epoch=epoch,
+                        metrics=record,
+                    )
+                if improved_composite:
+                    save_checkpoint(
+                        destination=save_root / "checkpoint_best_composite",
+                        model=raw_model,
+                        dynamics=dynamics,
+                        cfg=cfg,
+                        epoch=epoch,
+                        metrics=record,
+                    )
                     save_checkpoint(
                         destination=save_root / "checkpoint_best",
                         model=raw_model,
@@ -805,9 +1040,34 @@ def train(cfg: TrainConfig | None = None) -> None:
                             "epoch": epoch,
                             "monitor": "validation.total",
                             "value": validation_metrics["total"],
-                            "path": str(save_root / "checkpoint_best"),
+                            "path": str(save_root / "checkpoint_best_composite"),
+                            "role": "primary_test_checkpoint",
                         },
                     )
+                write_json(
+                    save_root / "best_checkpoints.json",
+                    {
+                        "primary": {
+                            "monitor": "validation.total",
+                            "epoch": composite_stopping.best_epoch,
+                            "value": composite_stopping.best,
+                            "path": str(save_root / "checkpoint_best_composite"),
+                        },
+                        "diagnostic_sft": {
+                            "monitor": "validation.sft",
+                            "epoch": best_sft.best_epoch,
+                            "value": best_sft.best,
+                            "path": str(save_root / "checkpoint_best_sft"),
+                        },
+                        "diagnostic_dynamics": {
+                            "monitor": "validation.dynamics",
+                            "epoch": best_dynamics.best_epoch,
+                            "value": best_dynamics.best,
+                            "path": str(save_root / "checkpoint_best_dynamics"),
+                        },
+                        "last": str(save_root / "checkpoint_last"),
+                    },
+                )
             if distributed:
                 dist.barrier()
             if should_stop:
@@ -816,8 +1076,8 @@ def train(cfg: TrainConfig | None = None) -> None:
                     logger.info(
                         "early_stop epoch=%d best_epoch=%d best_validation_total=%.6f",
                         epoch,
-                        early_stopping.best_epoch,
-                        early_stopping.best,
+                        composite_stopping.best_epoch,
+                        composite_stopping.best,
                     )
                 break
 
@@ -827,8 +1087,13 @@ def train(cfg: TrainConfig | None = None) -> None:
                 {
                     "status": "completed",
                     "completed_epochs": len(history),
-                    "best_epoch": early_stopping.best_epoch,
-                    "best_validation_total": early_stopping.best,
+                    "best_epoch": composite_stopping.best_epoch,
+                    "best_validation_total": composite_stopping.best,
+                    "best_sft_epoch": best_sft.best_epoch,
+                    "best_validation_sft": best_sft.best,
+                    "best_dynamics_epoch": best_dynamics.best_epoch,
+                    "best_validation_dynamics": best_dynamics.best,
+                    "primary_checkpoint": str(save_root / "checkpoint_best_composite"),
                     "early_stopped": stopped_early,
                     "variant": cfg.variant,
                     "structure_mode": cfg.structure_mode,

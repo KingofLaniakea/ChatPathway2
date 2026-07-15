@@ -6,6 +6,7 @@ import unittest
 from method.training.sequence import (
     IncompleteSupervisionError,
     encode_supervised,
+    pathway_layer_event_objects,
     pathway_step_substep_texts,
     trim_prompt_ids,
 )
@@ -156,6 +157,44 @@ class SequenceEncodingTests(unittest.TestCase):
             pathway_step_substep_texts(answer),
             (("A activates B.", "C inhibits D."), ("B produces E.",)),
         )
+
+    def test_compact_v4_alignment_encodes_the_complete_event_object(self) -> None:
+        payload = {
+            "schema_version": "pathway_continuation_v4",
+            "remaining_layers": [
+                {
+                    "layer_index": 3,
+                    "events": [
+                        {
+                            "event_type": "relation",
+                            "source": [{"canonical_id": "ko:K00001", "name": "A", "aliases": []}],
+                            "action": {"kind": "relation", "subtypes": ["activation"]},
+                            "mediators": [],
+                            "target": [{"canonical_id": "ko:K00002", "name": "B", "aliases": []}],
+                            "text": "A activates B.",
+                        }
+                    ],
+                }
+            ],
+        }
+        answer = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        encoded = encode_supervised(
+            self.tokenizer,
+            "PROMPT",
+            answer,
+            max_length=len(answer) + 100,
+        )
+        self.assertEqual(len(pathway_layer_event_objects(answer)), 1)
+        start, end = encoded.step_span_groups[0][0]
+        serialized_span = answer[start - len("PROMPT") : end - len("PROMPT")]
+        self.assertIn('"event_type":"relation"', serialized_span)
+        self.assertIn('"canonical_id":"ko:K00001"', serialized_span)
+        self.assertIn('"text":"A activates B."', serialized_span)
 
 
 if __name__ == "__main__":

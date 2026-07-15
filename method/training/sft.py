@@ -45,7 +45,7 @@ from method.training.prefix_sampling import (
 
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
-DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
+DEFAULT_TRAIN = "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv"
 DEFAULT_SAVE = "/root/autodl-tmp/checkpoints/shared/pathway_sft"
 
 
@@ -166,16 +166,16 @@ def parse_args() -> SFTConfig:
     parser.add_argument("--validation", dest="validation_path")
     parser.add_argument("--save-dir", default=DEFAULT_SAVE)
     parser.add_argument("--resume-adapter")
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--epochs", type=int, default=12)
-    parser.add_argument("--max-length", type=int, default=1072)
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--max-length", type=int, default=8192)
     parser.add_argument("--answer-budget-fraction", type=float, default=0.5)
     parser.add_argument(
         "--prefix-sampling",
         choices=PREFIX_SAMPLING_MODES,
-        default="all_rows",
+        default="one_per_record",
         help="Train every materialized prefix or one deterministic prefix per record per epoch.",
     )
     parser.add_argument(
@@ -194,7 +194,7 @@ def parse_args() -> SFTConfig:
     )
     parser.add_argument("--no-gradient-checkpointing", action="store_true")
     parser.add_argument("--validation-fraction", type=float, default=0.05)
-    parser.add_argument("--validation-group-column", default="source_json")
+    parser.add_argument("--validation-group-column", default="pathway_family_id")
     parser.add_argument("--early-stopping-patience", type=int, default=3)
     parser.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=20260711)

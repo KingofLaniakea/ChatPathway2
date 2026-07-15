@@ -39,6 +39,17 @@
   `dt=1/128`、最多 128 layer advances。
 - 固化 stage-1、compute-matched stage-2 SFT-only、HNN、FDHNN 四条归因臂与三 seed 共享 SFT/AE 规则。
 
+### 2026-07-16 — v4 event/layer dynamics 与 D3 主线
+
+- 将 v4 dynamics span 从 event 的 `text` 扩展为完整 compact event object，包含参与者、action、mediators、target 与 text；仍按 graph layer 分组。
+- 实现两层 surrogate-time：层内 canonical event 使用 `dt=1/512`，进入新 layer 使用 `dt=1/128`；明确不将层内遍历声称为实测生物时间。
+- B1 AE 主基准改为纯 MSE；B2 下一层预测和 B3 latent 均值/方差/协方差损失以默认权重 0 注册。
+- 新增 `hamiltonian_pretrain.py`，固定 SFT/AE 后独立训练 HNN/FDHNN 1--3 轮，并以有限性、coverage、改善和回退阈值决定 `stability_passed`。
+- 新增 E010→E011 与 E020→E021：稳定 checkpoint 才能进入低 LR D3；D4 的 exp001/exp002 保留为直接联合消融。
+- D3 加入 stage-1 KL、dynamics-to-LoRA 前 10% 梯度渐增、每 100 optimizer steps 梯度夹角和 best-SFT/best-dynamics/best-composite/last 四类 checkpoint。
+- 调度器不再用“文件存在”判断预训练成功；`run_complete.json` 必须明确 `status=completed`，否则依赖任务阻断。
+- 本地矩阵/路径/单测和 Excel 渲染审计通过；CFFF PyTorch 单测待代码同步后运行，不加载基础模型。
+
 ### 推理与 artifact 审计
 
 - 确认历史 Framework A inference 只加载 LoRA，不运行 HNN/AE rollout。
@@ -131,8 +142,8 @@
 ### P1：正式训练与时间实测
 
 - [ ] 先用冻结 revision 做 disposable 小规模端到端贯通。
-- [ ] 分别实测四卡 SFT、单卡 AE、四卡 FDHNN 和 2+2 卡 HNN/SFT-control 的 throughput、显存、验证与保存开销。
-- [ ] 对 `20260711/12/13` 运行 shared base000 与 exp000/003/001/002，不混用 SFT/AE digest。
+- [ ] 分别实测四卡 SFT、单卡 AE，以及任务并行的单卡 HNN/FDHNN/SFT-control throughput、显存、验证与保存开销。
+- [ ] 对 `20260711/12/13` 运行 shared base000 与 exp000/003/010/011/020/021/001/002，不混用 SFT/AE digest。
 - [ ] 只对 validation-selected checkpoint 运行 strict core 与 organism-transfer direct inference。
 - [ ] 汇总三 seed 结果、失败样本、coverage、config、hash 和完整 logs。
 
@@ -147,10 +158,12 @@
 ### P2：第一轮后的方法轴
 
 - [ ] graph-layer JSON boundary controller。
-- [ ] v3 canonical event-resolution dynamics。
-- [ ] 实现 D3：固定 SFT+AE 预训练 HNN/FDHNN 1--3 轮并通过 validation 稳定判据，再以
-  LoRA `5e-6`/`1e-5`、dynamics `2e-4` 联合训练；加入动力学到 LoRA 的权重 warmup、
+- [x] v4 完整 event-object dynamics：层内快步、跨 graph-layer 慢步，并保留 layer identity。
+- [x] 实现 D3：固定 SFT+AE 预训练 HNN/FDHNN 1--3 轮并通过 validation 稳定判据，再以
+  LoRA `1e-5`、dynamics `2e-4` 联合训练；加入 dynamics-to-LoRA 梯度 warmup、
   stage-1 SFT 输出 KL、LoRA 梯度夹角日志和三类 validation-best checkpoint。
+- [x] 实现 D2/D3 的成功终止标记与调度依赖；稳定性失败不能被文件存在性误判为完成。
+- [x] 将 B1 AE 固定为纯 MSE 主基准；实现但不默认启用 B2 predictive 与 B3 geometry losses。
 - [ ] 独立 token-resolution dynamics。
 - [ ] 前述 controller 通过后的 multiscale hybrid。
 - [ ] AE 表示、frozen teacher target、latent dimension/geometry 消融。

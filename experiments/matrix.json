@@ -1,6 +1,6 @@
 {
-  "version": "2026-07-15-v4.0",
-  "purpose": "Direct-inference controlled benchmark on the full-index, strictly audited structured pathway-continuation v4 release. All stage-2 arms share one P0 SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
+  "version": "2026-07-16-v4.1",
+  "purpose": "Controlled HNN/forced-damped-HNN benchmark on the full-index v4 release. The primary path freezes one shared stage-1 SFT and MSE AE, pretrains dynamics to an explicit validation stability gate, then performs low-LR stage-2 SFT with KL, dynamics-to-LoRA warm-up, gradient-conflict diagnostics, and direct inference.",
   "dataset_profile": {
     "name": "structured_pathway_continuation_v4_full",
     "release_schema": "chatpathway_structured_release_v4.0",
@@ -33,7 +33,7 @@
     "immutable_audit": "data/pathway_v4_full/data_audit.json",
     "source_graph_hashes": "data/pathway_v4_full/source_graph_hashes.tsv",
     "release_gate": "The scheduler requires all five P0 CSV/record JSONL pairs, schema v4.0, exact file and source hashes, a complete full-corpus canonical index, zero strict identity/family leakage in the declared comparisons, globally optimal horizon balance, zero accepted rows above 8192 tokens, and read-only mode 0444 data_audit.json.",
-    "semantic_unit": "Each canonical event is one relation or reaction with participants, aliases, structured action, mediators, text, producer IDs, and graph-layer position. Layers are ordinal causal depth rather than measured time; same-layer events are not assigned a fictitious biological order.",
+    "semantic_unit": "Each dynamics substep encodes the complete canonical relation/reaction object, not only its text. Canonical within-layer traversal uses a short surrogate increment and every graph-layer boundary uses a larger increment. Layer depth is preserved, while within-layer order is not claimed to be measured biological time.",
     "epoch_prefix_sampling": "The formal v4 CSV contains one globally balanced, seed-fixed short/middle/long prefix per unique selected record. The full canonical index retains every eligible prefix choice so later registered rematerializations can test alternative horizon schedules without reparsing graphs.",
     "source_schema_note": "v4 reconstructs sink-SCC views from strict processed_graph topology, merges only semantic duplicates after layer assignment while retaining every producer event ID, treats additional IDs on a non-group KGML entry as aliases, and excludes phenotype from the core target."
   },
@@ -62,16 +62,21 @@
       "a2_forced_damped_hnn": "(J-rI) grad H + F(t), with isotropic positive damping and time-only force."
     },
     "b_ae": {
-      "b0_reconstruction_ae_shared": "One shared frozen reconstruction AE; trained on answer tokens plus the final prompt anchor."
+      "b1_reconstruction_mse_shared": "One shared frozen reconstruction AE trained with MSE on answer tokens plus the final prompt anchor; cosine is disabled in the main baseline and retained only as an explicit ablation.",
+      "b2_predictive_ae": "Optional reconstruction plus one-layer prediction objective.",
+      "b3_geometry_ae": "Optional reconstruction plus latent mean, variance, and off-diagonal covariance conditioning without assigning arbitrary q/p coordinates."
     },
     "d_training_schedule": {
       "shared_prerequisite": "Train stage-1 SFT and AE once.",
       "d0_stage1_sft": "Use shared stage-1 SFT directly.",
       "d1_stage2_sft_control": "Same stage-2 loop with every dynamics loss and dynamics LR set to zero.",
-      "d2_stage2_joint_dynamics": "Jointly refine the same LoRA and the selected Hamiltonian dynamics."
+      "d2_dynamics_only": "Freeze stage-1 LoRA and AE; train only HNN/FDHNN for one to three epochs with a validation stability gate.",
+      "d3_pretrain_then_joint": "Warm-start from stable D2, then low-LR stage-2 SFT with KL and a 10% dynamics-to-LoRA gradient warm-up.",
+      "d4_direct_joint": "Start stage-2 SFT and dynamics jointly from a randomly initialized vector field; retained as the direct-joint ablation."
     },
     "c_inference": {
-      "c0_direct_lora": "Direct greedy LoRA generation. Dynamics is not loaded at generation time."
+      "c0_trajectory_stability": "No generation; evaluate only the D2 dynamics trajectory and stability gate.",
+      "c1_direct_lora": "Direct greedy LoRA generation. Dynamics is not loaded at generation time."
     }
   },
   "implemented": [
@@ -86,7 +91,7 @@
       "infer_module": "experiments.methods.base000_shared_sft_reconae.infer",
       "notes": "Run once per dataset revision and seed; every controlled stage-2 row reuses checkpoint_best from both stages.",
       "a_dynamics": "a0_none",
-      "b_ae": "b0_reconstruction_ae_shared",
+      "b_ae": "b1_reconstruction_mse_shared",
       "d_training_schedule": "shared_prerequisite",
       "c_inference": "artifact_check",
       "status": "runnable_shared_prerequisite",
@@ -105,7 +110,7 @@
       "a_dynamics": "a0_none",
       "b_ae": "none",
       "d_training_schedule": "d0_stage1_sft",
-      "c_inference": "c0_direct_lora",
+      "c_inference": "c1_direct_lora",
       "status": "runnable_baseline",
       "what_it_tests": "Stage-1 SFT generation quality."
     },
@@ -118,47 +123,115 @@
       "inference_mode": "direct greedy LoRA generation",
       "train_module": "experiments.methods.exp003_stage2_sft_only_direct.train",
       "infer_module": "experiments.methods.exp003_stage2_sft_only_direct.infer",
-      "notes": "Primary attribution control for exp001/exp002; same rows, seed, epochs, optimizer loop, and validation split.",
+      "notes": "Primary attribution control for staged and direct-joint arms; it uses the same low LoRA LR, stage-1 KL, rows, epochs, and validation split but zero dynamics objective.",
       "a_dynamics": "a0_none",
-      "b_ae": "b0_reconstruction_ae_shared",
+      "b_ae": "b1_reconstruction_mse_shared",
       "d_training_schedule": "d1_stage2_sft_control",
-      "c_inference": "c0_direct_lora",
+      "c_inference": "c1_direct_lora",
       "status": "runnable_control",
       "what_it_tests": "Separates extra stage-2 SFT compute from dynamics regularization."
     },
     {
-      "id": "exp001_hnn_reconae_joint_direct",
-      "title": "Pure HNN plus joint stage-2 LoRA and direct inference",
-      "granularity": "graph-layer trajectory with same-layer event-set pooling",
+      "id": "exp010_hnn_reconae_dynamics_only",
+      "title": "Pure HNN dynamics-only pretraining",
+      "granularity": "complete event-object substeps with explicit graph-layer boundary increments",
       "middle_network": "dz/dt = J grad H; J=Q^T J0 Q",
-      "training_coupling": "shared SFT/AE then joint stage-2 LoRA plus HNN",
+      "training_coupling": "freeze stage-1 SFT and MSE AE; optimize only HNN for one to three epochs",
+      "inference_mode": "artifact and stability-gate verification",
+      "train_module": "experiments.methods.exp010_hnn_reconae_dynamics_only.train",
+      "infer_module": "experiments.methods.exp010_hnn_reconae_dynamics_only.infer",
+      "notes": "D2 control and required initialization for E011; no LoRA parameter is updated.",
+      "a_dynamics": "a1_hnn_orthogonal_poisson",
+      "b_ae": "b1_reconstruction_mse_shared",
+      "d_training_schedule": "d2_dynamics_only",
+      "c_inference": "c0_trajectory_stability",
+      "status": "runnable_core_pretrain",
+      "what_it_tests": "Whether conservative HNN dynamics can fit the fixed SFT+AE event trajectory."
+    },
+    {
+      "id": "exp011_hnn_reconae_pretrain_joint_direct",
+      "title": "Pure HNN pretraining then regularized stage-2 SFT",
+      "granularity": "complete event-object substeps with explicit graph-layer boundary increments",
+      "middle_network": "dz/dt = J grad H; J=Q^T J0 Q",
+      "training_coupling": "stable E010 HNN then low-LR LoRA+dynamics with KL and 10% dynamics-to-LoRA warm-up",
+      "inference_mode": "direct greedy LoRA generation from best validation composite",
+      "train_module": "experiments.methods.exp011_hnn_reconae_pretrain_joint_direct.train",
+      "infer_module": "experiments.methods.exp011_hnn_reconae_pretrain_joint_direct.infer",
+      "notes": "Primary conservative staged control; saves best SFT, dynamics, composite, and last checkpoints.",
+      "a_dynamics": "a1_hnn_orthogonal_poisson",
+      "b_ae": "b1_reconstruction_mse_shared",
+      "d_training_schedule": "d3_pretrain_then_joint",
+      "c_inference": "c1_direct_lora",
+      "status": "runnable_core_staged_control",
+      "what_it_tests": "Whether stabilizing HNN before LoRA updates improves over D2, D4, and SFT-only."
+    },
+    {
+      "id": "exp020_forced_damped_hnn_reconae_dynamics_only",
+      "title": "Forced/damped HNN dynamics-only pretraining",
+      "granularity": "complete event-object substeps with explicit graph-layer boundary increments",
+      "middle_network": "dz/dt = (J-rI) grad H + F(t); J=Q^T J0 Q, r>=0",
+      "training_coupling": "freeze stage-1 SFT and MSE AE; optimize only forced/damped HNN for one to three epochs",
+      "inference_mode": "artifact and stability-gate verification",
+      "train_module": "experiments.methods.exp020_forced_damped_hnn_reconae_dynamics_only.train",
+      "infer_module": "experiments.methods.exp020_forced_damped_hnn_reconae_dynamics_only.infer",
+      "notes": "D2 primary dynamics fit and required initialization for E021.",
+      "a_dynamics": "a2_forced_damped_hnn",
+      "b_ae": "b1_reconstruction_mse_shared",
+      "d_training_schedule": "d2_dynamics_only",
+      "c_inference": "c0_trajectory_stability",
+      "status": "runnable_core_pretrain_primary",
+      "what_it_tests": "Whether dissipation and time forcing fit fixed event trajectories better than pure HNN."
+    },
+    {
+      "id": "exp021_forced_damped_hnn_reconae_pretrain_joint_direct",
+      "title": "Forced/damped HNN pretraining then regularized stage-2 SFT",
+      "granularity": "complete event-object substeps with explicit graph-layer boundary increments",
+      "middle_network": "dz/dt = (J-rI) grad H + F(t); J=Q^T J0 Q, r>=0",
+      "training_coupling": "stable E020 FDHNN then low-LR LoRA+dynamics with KL and 10% dynamics-to-LoRA warm-up",
+      "inference_mode": "direct greedy LoRA generation from best validation composite",
+      "train_module": "experiments.methods.exp021_forced_damped_hnn_reconae_pretrain_joint_direct.train",
+      "infer_module": "experiments.methods.exp021_forced_damped_hnn_reconae_pretrain_joint_direct.infer",
+      "notes": "Primary method. Upstream pathway changes z0; no independent intervention input u is claimed.",
+      "a_dynamics": "a2_forced_damped_hnn",
+      "b_ae": "b1_reconstruction_mse_shared",
+      "d_training_schedule": "d3_pretrain_then_joint",
+      "c_inference": "c1_direct_lora",
+      "status": "runnable_core_staged_primary",
+      "what_it_tests": "Whether staged forced/damped HNN improves over staged pure HNN, direct joint, and SFT-only."
+    },
+    {
+      "id": "exp001_hnn_reconae_joint_direct",
+      "title": "Pure HNN direct-joint stage-2 ablation",
+      "granularity": "complete event-object substeps with explicit graph-layer boundary increments",
+      "middle_network": "dz/dt = J grad H; J=Q^T J0 Q",
+      "training_coupling": "randomly initialized HNN and LoRA are optimized jointly from the first batch",
       "inference_mode": "direct greedy LoRA generation; HNN is a training regularizer",
       "train_module": "experiments.methods.exp001_hnn_reconae_joint_direct.train",
       "infer_module": "experiments.methods.exp001_hnn_reconae_joint_direct.infer",
-      "notes": "Conservative Hamiltonian contrast under the same stage-2 schedule.",
+      "notes": "E012/D4 ablation; same low LoRA LR and KL as D3, but no dynamics pretraining or warm-up.",
       "a_dynamics": "a1_hnn_orthogonal_poisson",
-      "b_ae": "b0_reconstruction_ae_shared",
-      "d_training_schedule": "d2_stage2_joint_dynamics",
-      "c_inference": "c0_direct_lora",
-      "status": "runnable_core_control",
-      "what_it_tests": "Effect of conservative semantic-layer regularization beyond stage-2 SFT."
+      "b_ae": "b1_reconstruction_mse_shared",
+      "d_training_schedule": "d4_direct_joint",
+      "c_inference": "c1_direct_lora",
+      "status": "runnable_direct_joint_ablation",
+      "what_it_tests": "Whether HNN pretraining and gradient warm-up matter beyond direct joint optimization."
     },
     {
       "id": "exp002_forced_damped_hnn_reconae_joint_direct",
-      "title": "Forced/damped HNN plus joint stage-2 LoRA and direct inference",
-      "granularity": "graph-layer trajectory with same-layer event-set pooling",
+      "title": "Forced/damped HNN direct-joint stage-2 ablation",
+      "granularity": "complete event-object substeps with explicit graph-layer boundary increments",
       "middle_network": "dz/dt = (J-rI) grad H + F(t); J=Q^T J0 Q, r>=0",
-      "training_coupling": "shared SFT/AE then joint stage-2 LoRA plus forced/damped HNN",
+      "training_coupling": "randomly initialized FDHNN and LoRA are optimized jointly from the first batch",
       "inference_mode": "direct greedy LoRA generation; dynamics is a training regularizer",
       "train_module": "experiments.methods.exp002_forced_damped_hnn_reconae_joint_direct.train",
       "infer_module": "experiments.methods.exp002_forced_damped_hnn_reconae_joint_direct.infer",
-      "notes": "Primary method row. Upstream pathway changes z0; there is no independent intervention input u.",
+      "notes": "E022/D4 ablation; same low LoRA LR and KL as D3, but no dynamics pretraining or warm-up.",
       "a_dynamics": "a2_forced_damped_hnn",
-      "b_ae": "b0_reconstruction_ae_shared",
-      "d_training_schedule": "d2_stage2_joint_dynamics",
-      "c_inference": "c0_direct_lora",
-      "status": "runnable_core_primary",
-      "what_it_tests": "Whether isotropic dissipation and universal time forcing improve the pure HNN and stage-2 controls."
+      "b_ae": "b1_reconstruction_mse_shared",
+      "d_training_schedule": "d4_direct_joint",
+      "c_inference": "c1_direct_lora",
+      "status": "runnable_direct_joint_primary_ablation",
+      "what_it_tests": "Whether FDHNN pretraining and gradient warm-up matter beyond direct joint optimization."
     }
   ],
   "combinations": [

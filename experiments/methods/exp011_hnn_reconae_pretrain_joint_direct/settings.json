@@ -1,0 +1,8 @@
+{
+  "title": "Pure HNN pretraining then low-LR regularized stage-2 SFT",
+  "a_dynamics": "a1_hnn_orthogonal_poisson",
+  "b_ae": "b1_reconstruction_mse_shared",
+  "d_training_schedule": "d3_pretrain_then_joint",
+  "c_inference": "c1_direct_lora",
+  "status": "runnable_core_staged_control"
+}

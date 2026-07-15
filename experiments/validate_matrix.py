@@ -180,7 +180,7 @@ def validate_research_plan(matrix: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     for row in matrix.get("implemented", []):
         inference = row.get("c_inference")
-        if inference not in {"artifact_check", "c0_direct_lora"}:
+        if inference not in {"artifact_check", "c0_trajectory_stability", "c1_direct_lora"}:
             errors.append(
                 f"{row.get('id', '<missing id>')}: current matrix must use direct inference; got {inference!r}"
             )

@@ -44,7 +44,7 @@ from method.training.prefix_sampling import (
 
 DEFAULT_BASE_MODEL = "/root/autodl-tmp/models/qwen3_8B"
 DEFAULT_SFT = "/root/autodl-tmp/checkpoints/shared/pathway_sft/checkpoint_best"
-DEFAULT_TRAIN = "/root/autodl-tmp/data/train_kegg_pathway_record_balanced_0p1pct.csv"
+DEFAULT_TRAIN = "/root/autodl-tmp/data/pathway_v4_full/train_pathway_continuation_v4.csv"
 DEFAULT_SAVE = "/root/autodl-tmp/checkpoints/shared/pathway_reconstruction_ae"
 
 
@@ -65,6 +65,10 @@ class AEConfig:
     prefix_policy: str
     latent_dim: int
     cosine_weight: float
+    predictive_weight: float
+    latent_mean_weight: float
+    latent_variance_weight: float
+    latent_covariance_weight: float
     validation_fraction: float
     validation_group_column: str
     early_stopping_patience: int
@@ -83,16 +87,16 @@ def parse_args() -> AEConfig:
     parser.add_argument("--train", dest="train_path", default=DEFAULT_TRAIN)
     parser.add_argument("--validation", dest="validation_path")
     parser.add_argument("--save-dir", default=DEFAULT_SAVE)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=12)
-    parser.add_argument("--max-length", type=int, default=1072)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--max-length", type=int, default=8192)
     parser.add_argument("--answer-budget-fraction", type=float, default=0.5)
     parser.add_argument(
         "--prefix-sampling",
         choices=PREFIX_SAMPLING_MODES,
-        default="all_rows",
+        default="one_per_record",
     )
     parser.add_argument(
         "--prefix-policy",
@@ -100,9 +104,23 @@ def parse_args() -> AEConfig:
         default="balanced_cycle",
     )
     parser.add_argument("--latent-dim", type=int, default=128)
-    parser.add_argument("--cosine-weight", type=float, default=2.0)
+    parser.add_argument(
+        "--cosine-weight",
+        type=float,
+        default=0.0,
+        help="Optional reconstruction-direction ablation; the maintained B1 baseline is pure MSE.",
+    )
+    parser.add_argument(
+        "--predictive-weight",
+        type=float,
+        default=0.0,
+        help="Optional B2 one-layer latent prediction objective.",
+    )
+    parser.add_argument("--latent-mean-weight", type=float, default=0.0)
+    parser.add_argument("--latent-variance-weight", type=float, default=0.0)
+    parser.add_argument("--latent-covariance-weight", type=float, default=0.0)
     parser.add_argument("--validation-fraction", type=float, default=0.05)
-    parser.add_argument("--validation-group-column", default="source_json")
+    parser.add_argument("--validation-group-column", default="pathway_family_id")
     parser.add_argument("--early-stopping-patience", type=int, default=3)
     parser.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=20260711)
@@ -113,6 +131,15 @@ def parse_args() -> AEConfig:
     args = parser.parse_args()
     if not 0 < args.answer_budget_fraction < 1:
         parser.error("--answer-budget-fraction must be between 0 and 1")
+    for name in (
+        "cosine_weight",
+        "predictive_weight",
+        "latent_mean_weight",
+        "latent_variance_weight",
+        "latent_covariance_weight",
+    ):
+        if getattr(args, name) < 0:
+            parser.error(f"--{name.replace('_', '-')} must be non-negative")
     return AEConfig(**vars(args))
 
 
@@ -139,6 +166,21 @@ class CascadeProjection(nn.Module):
     def forward(self, hidden: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         latent = self.down(hidden)
         return latent, self.up(latent)
+
+
+class LatentTransitionPredictor(nn.Module):
+    """Small discarded-after-training head used by the registered B2 AE arm."""
+
+    def __init__(self, latent_dim: int, hidden_dim: int = 256) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, latent_dim),
+        )
+
+    def forward(self, latent: torch.Tensor) -> torch.Tensor:
+        return self.net(latent)
 
 
 class AEDataset(Dataset):
@@ -191,7 +233,15 @@ class AEDataset(Dataset):
             loss_mask[first_answer - 1] = 1
         return {
             "input_ids": torch.tensor(encoded.input_ids, dtype=torch.long),
+            "answer_mask": torch.tensor(
+                [int(label != -100) for label in encoded.labels],
+                dtype=torch.long,
+            ),
             "loss_mask": torch.tensor(loss_mask, dtype=torch.long),
+            "step_span_groups": [
+                torch.tensor(group, dtype=torch.long).reshape(-1, 2)
+                for group in encoded.step_span_groups
+            ],
             "prompt_tokens_dropped": encoded.prompt_tokens_dropped,
             "answer_tokens_dropped": encoded.answer_tokens_dropped,
         }
@@ -205,6 +255,9 @@ def make_collate_fn(pad_id: int):
         loss_mask = torch.nn.utils.rnn.pad_sequence(
             [item["loss_mask"] for item in batch], batch_first=True, padding_value=0
         )
+        answer_mask = torch.nn.utils.rnn.pad_sequence(
+            [item["answer_mask"] for item in batch], batch_first=True, padding_value=0
+        )
         attention_mask = torch.nn.utils.rnn.pad_sequence(
             [torch.ones_like(item["input_ids"]) for item in batch],
             batch_first=True,
@@ -213,7 +266,9 @@ def make_collate_fn(pad_id: int):
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
+            "answer_mask": answer_mask,
             "loss_mask": loss_mask,
+            "step_span_groups": [item["step_span_groups"] for item in batch],
             "prompt_tokens_dropped": sum(int(item["prompt_tokens_dropped"]) for item in batch),
             "answer_tokens_dropped": sum(int(item["answer_tokens_dropped"]) for item in batch),
         }
@@ -247,6 +302,54 @@ def load_frames(cfg: AEConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
     )
 
 
+def latent_geometry_losses(latent: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Return scale/conditioning diagnostics without assigning q/p semantics."""
+
+    if latent.ndim != 2:
+        raise ValueError("latent geometry expects [tokens, latent_dim]")
+    if latent.size(0) < 2:
+        zero = latent.new_zeros(())
+        return {"latent_mean": zero, "latent_variance": zero, "latent_covariance": zero}
+    centered = latent - latent.mean(dim=0, keepdim=True)
+    variance = centered.pow(2).mean(dim=0)
+    covariance = centered.transpose(0, 1) @ centered / float(latent.size(0) - 1)
+    off_diagonal = covariance - torch.diag(torch.diagonal(covariance))
+    return {
+        "latent_mean": latent.mean(dim=0).pow(2).mean(),
+        "latent_variance": (variance - 1.0).pow(2).mean(),
+        "latent_covariance": off_diagonal.pow(2).mean(),
+    }
+
+
+def _predictive_loss(
+    latent: torch.Tensor,
+    batch: dict[str, Any],
+    predictor: LatentTransitionPredictor | None,
+) -> torch.Tensor:
+    if predictor is None:
+        return latent.new_zeros(())
+    answer_mask = batch["answer_mask"].to(latent.device).bool()
+    sample_losses: list[torch.Tensor] = []
+    for sample_index, groups in enumerate(batch["step_span_groups"]):
+        if not groups or not bool(answer_mask[sample_index].any()):
+            continue
+        first_answer = int(answer_mask[sample_index].to(torch.int64).argmax().item())
+        anchor = latent[sample_index, max(first_answer - 1, 0)]
+        layer_states = torch.stack([
+            torch.cat([
+                latent[sample_index, int(start) : int(end)]
+                for start, end in group.to(latent.device).tolist()
+            ]).mean(dim=0)
+            for group in groups
+        ])
+        sequence = torch.cat([anchor.unsqueeze(0), layer_states], dim=0)
+        predicted = predictor(sequence[:-1])
+        sample_losses.append(nn.functional.smooth_l1_loss(predicted, sequence[1:].detach()))
+    if not sample_losses:
+        return latent.new_zeros(())
+    return torch.stack(sample_losses).mean()
+
+
 def reconstruction_losses(
     *,
     backbone: nn.Module,
@@ -254,6 +357,11 @@ def reconstruction_losses(
     batch: dict[str, torch.Tensor],
     device: str,
     cosine_weight: float,
+    predictive_weight: float,
+    latent_mean_weight: float,
+    latent_variance_weight: float,
+    latent_covariance_weight: float,
+    predictor: LatentTransitionPredictor | None = None,
 ) -> dict[str, torch.Tensor] | None:
     input_ids = batch["input_ids"].to(device)
     attention_mask = batch["attention_mask"].to(device)
@@ -265,7 +373,7 @@ def reconstruction_losses(
             output_hidden_states=True,
             use_cache=False,
         ).hidden_states[-1].float()
-    _, reconstructed = projection(hidden)
+    latent, reconstructed = projection(hidden)
     active = loss_mask.bool()
     if not active.any():
         return None
@@ -273,27 +381,60 @@ def reconstruction_losses(
     prediction = reconstructed[active]
     mse = nn.functional.mse_loss(prediction, target)
     cosine = 1.0 - nn.functional.cosine_similarity(prediction, target, dim=-1).mean()
-    return {"total": mse + cosine_weight * cosine, "mse": mse, "cosine": cosine}
+    geometry = latent_geometry_losses(latent[active])
+    predictive = _predictive_loss(latent, batch, predictor)
+    total = (
+        mse
+        + cosine_weight * cosine
+        + predictive_weight * predictive
+        + latent_mean_weight * geometry["latent_mean"]
+        + latent_variance_weight * geometry["latent_variance"]
+        + latent_covariance_weight * geometry["latent_covariance"]
+    )
+    return {
+        "total": total,
+        "mse": mse,
+        "cosine": cosine,
+        "predictive": predictive,
+        **geometry,
+    }
 
 
 def evaluate(
     backbone: nn.Module,
     projection: CascadeProjection,
+    predictor: LatentTransitionPredictor | None,
     loader: DataLoader,
     cfg: AEConfig,
 ) -> dict[str, float | int]:
     projection.eval()
-    sums = {"total": 0.0, "mse": 0.0, "cosine": 0.0}
+    if predictor is not None:
+        predictor.eval()
+    sums = {
+        "total": 0.0,
+        "mse": 0.0,
+        "cosine": 0.0,
+        "predictive": 0.0,
+        "latent_mean": 0.0,
+        "latent_variance": 0.0,
+        "latent_covariance": 0.0,
+    }
     steps = 0
     prompt_dropped = answer_dropped = 0
     for batch in loader:
-        losses = reconstruction_losses(
-            backbone=backbone,
-            projection=projection,
-            batch=batch,
-            device=cfg.device,
-            cosine_weight=cfg.cosine_weight,
-        )
+        with torch.no_grad():
+            losses = reconstruction_losses(
+                backbone=backbone,
+                projection=projection,
+                batch=batch,
+                device=cfg.device,
+                cosine_weight=cfg.cosine_weight,
+                predictive_weight=cfg.predictive_weight,
+                latent_mean_weight=cfg.latent_mean_weight,
+                latent_variance_weight=cfg.latent_variance_weight,
+                latent_covariance_weight=cfg.latent_covariance_weight,
+                predictor=predictor,
+            )
         if losses is None:
             continue
         for key in sums:
@@ -308,9 +449,17 @@ def evaluate(
     }
 
 
-def save_checkpoint(destination: Path, projection: CascadeProjection, epoch: int, metrics: dict[str, Any]) -> None:
+def save_checkpoint(
+    destination: Path,
+    projection: CascadeProjection,
+    predictor: LatentTransitionPredictor | None,
+    epoch: int,
+    metrics: dict[str, Any],
+) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     torch.save(projection.state_dict(), destination / "ae_proj.pt")
+    if predictor is not None:
+        torch.save(predictor.state_dict(), destination / "transition_predictor.pt")
     write_json(destination / "checkpoint_metrics.json", {"epoch": epoch, **metrics})
 
 
@@ -392,7 +541,15 @@ def train() -> None:
         high_dim=base_model.config.hidden_size,
         latent_dim=cfg.latent_dim,
     ).to(cfg.device).float()
-    optimizer = optim.AdamW(projection.parameters(), lr=cfg.lr)
+    predictor = (
+        LatentTransitionPredictor(cfg.latent_dim).to(cfg.device).float()
+        if cfg.predictive_weight > 0
+        else None
+    )
+    trainable_parameters = list(projection.parameters())
+    if predictor is not None:
+        trainable_parameters.extend(predictor.parameters())
+    optimizer = optim.AdamW(trainable_parameters, lr=cfg.lr)
     collate = make_collate_fn(tokenizer.pad_token_id)
     train_dataset = AEDataset(
         train_frame,
@@ -446,8 +603,18 @@ def train() -> None:
             prefix_selection,
         )
         projection.train()
+        if predictor is not None:
+            predictor.train()
         train_started = time.perf_counter()
-        sums = {"total": 0.0, "mse": 0.0, "cosine": 0.0}
+        sums = {
+            "total": 0.0,
+            "mse": 0.0,
+            "cosine": 0.0,
+            "predictive": 0.0,
+            "latent_mean": 0.0,
+            "latent_variance": 0.0,
+            "latent_covariance": 0.0,
+        }
         steps = 0
         prompt_dropped = answer_dropped = 0
         input_tokens = reconstruction_tokens = 0
@@ -461,6 +628,11 @@ def train() -> None:
                 batch=batch,
                 device=cfg.device,
                 cosine_weight=cfg.cosine_weight,
+                predictive_weight=cfg.predictive_weight,
+                latent_mean_weight=cfg.latent_mean_weight,
+                latent_variance_weight=cfg.latent_variance_weight,
+                latent_covariance_weight=cfg.latent_covariance_weight,
+                predictor=predictor,
             )
             if losses is None:
                 continue
@@ -472,7 +644,7 @@ def train() -> None:
             prompt_dropped += int(batch["prompt_tokens_dropped"])
             answer_dropped += int(batch["answer_tokens_dropped"])
             if (step + 1) % cfg.gradient_accumulation_steps == 0 or step + 1 == len(train_loader):
-                nn.utils.clip_grad_norm_(projection.parameters(), 1.0)
+                nn.utils.clip_grad_norm_(trainable_parameters, 1.0)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             progress.set_postfix(total=f"{losses['total'].item():.4f}", mse=f"{losses['mse'].item():.4f}")
@@ -492,7 +664,7 @@ def train() -> None:
             float(train_metrics["seconds"]), 1e-9
         )
         validation_started = time.perf_counter()
-        validation_metrics = evaluate(backbone, projection, validation_loader, cfg)
+        validation_metrics = evaluate(backbone, projection, predictor, validation_loader, cfg)
         validation_metrics["seconds"] = time.perf_counter() - validation_started
         record = {
             "epoch": epoch,
@@ -515,10 +687,10 @@ def train() -> None:
             validation_metrics["seconds"],
             train_metrics["reconstruction_tokens_per_second"],
         )
-        save_checkpoint(save_root / f"checkpoint_epoch_{epoch}", projection, epoch, record)
+        save_checkpoint(save_root / f"checkpoint_epoch_{epoch}", projection, predictor, epoch, record)
         improved, should_stop = early_stopping.update(validation_metrics["total"], epoch)
         if improved:
-            save_checkpoint(save_root / "checkpoint_best", projection, epoch, record)
+            save_checkpoint(save_root / "checkpoint_best", projection, predictor, epoch, record)
             write_json(
                 save_root / "best_checkpoint.json",
                 {

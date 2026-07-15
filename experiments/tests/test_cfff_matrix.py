@@ -30,6 +30,7 @@ from dataprocess.prompt_profiles import (
 from experiments.run_cfff_matrix import (
     Job,
     build_jobs,
+    outputs_complete,
     run_scheduler,
     select_baseline_inference_jobs,
     validate_inputs,
@@ -40,6 +41,24 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
     @staticmethod
     def _digest(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_outputs_complete_requires_successful_terminal_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "run_complete.json"
+            artifact = Path(temporary) / "checkpoint.pt"
+            artifact.write_bytes(b"checkpoint")
+            job = Job(
+                key="pretrain",
+                seed=11,
+                resources=1,
+                dependencies=(),
+                command=("true",),
+                outputs=(artifact, marker),
+            )
+            marker.write_text('{"status":"max_epochs_without_stability"}\n', encoding="utf-8")
+            self.assertFalse(outputs_complete(job))
+            marker.write_text('{"status":"completed"}\n', encoding="utf-8")
+            self.assertTrue(outputs_complete(job))
 
     def _release_fixture(self, root: Path) -> tuple[dict[str, Path], dict[str, Path], Path]:
         model = root / "models/qwen3_8B"
@@ -296,25 +315,37 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
         jobs = build_jobs([11], root, "/python")
         by_key = {job.key: job for job in jobs}
 
-        self.assertEqual(len(jobs), 65)
+        self.assertEqual(len(jobs), 99)
         self.assertEqual(by_key["11:sft"].resources, 4)
         self.assertEqual(by_key["11:ae"].resources, 1)
         self.assertEqual(by_key["11:ae"].dependencies, ("11:sft",))
+        self.assertEqual(
+            by_key["11:sft"].command[by_key["11:sft"].command.index("--epochs") + 1],
+            "1",
+        )
+        self.assertEqual(
+            by_key["11:ae"].command[by_key["11:ae"].command.index("--epochs") + 1],
+            "3",
+        )
         fdhnn_train = by_key["11:exp002_forced_damped_hnn_reconae_joint_direct:train"]
         hnn_train = by_key["11:exp001_hnn_reconae_joint_direct:train"]
         stage2_sft_train = by_key["11:exp003_stage2_sft_only_direct:train"]
-        self.assertEqual(fdhnn_train.resources, 4)
-        self.assertEqual(hnn_train.resources, 2)
-        self.assertEqual(stage2_sft_train.resources, 2)
-        self.assertEqual(
-            fdhnn_train.command[fdhnn_train.command.index("--gradient-accumulation-steps") + 1],
-            "3",
-        )
+        self.assertEqual(fdhnn_train.resources, 1)
+        self.assertEqual(hnn_train.resources, 1)
+        self.assertEqual(stage2_sft_train.resources, 1)
         for job in (hnn_train, stage2_sft_train):
             self.assertEqual(
                 job.command[job.command.index("--gradient-accumulation-steps") + 1],
-                "6",
+                "12",
             )
+        hnn_pretrain = by_key["11:exp010_hnn_reconae_dynamics_only:train"]
+        fdhnn_pretrain = by_key["11:exp020_forced_damped_hnn_reconae_dynamics_only:train"]
+        staged_hnn = by_key["11:exp011_hnn_reconae_pretrain_joint_direct:train"]
+        staged_fdhnn = by_key["11:exp021_forced_damped_hnn_reconae_pretrain_joint_direct:train"]
+        self.assertEqual(hnn_pretrain.resources, 1)
+        self.assertEqual(fdhnn_pretrain.resources, 1)
+        self.assertEqual(staged_hnn.dependencies, (hnn_pretrain.key,))
+        self.assertEqual(staged_fdhnn.dependencies, (fdhnn_pretrain.key,))
         inference_prefix = "11:exp001_hnn_reconae_joint_direct:infer"
         shard_keys = tuple(f"{inference_prefix}:shard{index}" for index in range(4))
         self.assertEqual(by_key[inference_prefix].dependencies, shard_keys)
@@ -419,7 +450,7 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
         for job in selected:
             self.assertTrue(set(job.dependencies).issubset(keys))
 
-    def test_scheduler_allocates_four_then_two_plus_two_gpus(self) -> None:
+    def test_scheduler_allocates_four_gpu_sft_then_single_gpu_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first_output = root / "first.txt"
