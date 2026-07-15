@@ -26,13 +26,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from dataprocess.release_contract import (
+from dataprocess.release_contract_v4 import (
+    ALL_SPLITS,
+    AUDIT_NAME,
     AUDIT_SCHEMA_VERSION,
-    OVERLAP_CONTRACT,
-    PARTITIONS,
-    PRIMARY_CSV_NAMES,
+    CSV_NAMES,
+    MANIFEST_NAME,
     PRIMARY_PROMPT_PROFILE,
-    RECORD_JSONL_NAMES,
+    RECORD_NAMES,
     RELEASE_SCHEMA_VERSION,
     SOURCE_GRAPH_HASHES_NAME,
 )
@@ -40,7 +41,7 @@ from dataprocess.prompt_profiles import (
     NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
     SPECIES_NEUTRAL_IDS_NO_ORGANISM,
 )
-from dataprocess.source_hashes import verify_source_graph_hashes
+from dataprocess.source_hashes import verify_source_graph_hashes_tsv
 from experiments._launch import controlled_training_budget_args
 from experiments.runtime_config import asset_root
 
@@ -50,8 +51,8 @@ STAGE2_IDS = (
     "exp001_hnn_reconae_joint_direct",
     "exp003_stage2_sft_only_direct",
 )
-DATASET_DIRECTORY = Path("data/pathway_v3_cap256")
-EVALUATION_PARTITIONS = ("test", "test_family_only", "test_organism_only")
+DATASET_DIRECTORY = Path("data/pathway_v4_full")
+EVALUATION_PARTITIONS = ("test", "test_organism", "test_strict")
 CONTROLLED_MAX_LENGTH = 8192
 
 STAGE2_RESOURCES = {
@@ -229,8 +230,8 @@ def build_jobs(
     model = root / "models/qwen3_8B"
     dataset_root = root / DATASET_DIRECTORY
     csv_files = {
-        partition: dataset_root / PRIMARY_CSV_NAMES[partition]
-        for partition in PARTITIONS
+        partition: dataset_root / CSV_NAMES[partition]
+        for partition in ALL_SPLITS
     }
     train = csv_files["train"]
     validation = csv_files["validation"]
@@ -421,17 +422,17 @@ def outputs_complete(job: Job) -> bool:
 
 
 def validate_inputs(root: Path) -> None:
+    """Fail closed unless the complete immutable v4 release still matches disk."""
+
     dataset_root = root / DATASET_DIRECTORY
     csv_files = {
-        partition: dataset_root / PRIMARY_CSV_NAMES[partition]
-        for partition in PARTITIONS
+        split: dataset_root / CSV_NAMES[split] for split in ALL_SPLITS
     }
     record_files = {
-        partition: dataset_root / RECORD_JSONL_NAMES[partition]
-        for partition in PARTITIONS
+        split: dataset_root / RECORD_NAMES[split] for split in ALL_SPLITS
     }
-    manifest = dataset_root / "dataset_manifest.json"
-    audit_path = dataset_root / "data_audit.json"
+    manifest = dataset_root / MANIFEST_NAME
+    audit_path = dataset_root / AUDIT_NAME
     source_graph_hashes = dataset_root / SOURCE_GRAPH_HASHES_NAME
     required = (
         root / "models/qwen3_8B/config.json",
@@ -448,23 +449,29 @@ def validate_inputs(root: Path) -> None:
     manifest_value = json.loads(manifest.read_text(encoding="utf-8"))
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     if manifest_value.get("schema_version") != RELEASE_SCHEMA_VERSION:
-        raise ValueError("dataset manifest is not the structured release v3.1 contract")
+        raise ValueError("dataset manifest is not the structured release v4 contract")
     if audit.get("schema_version") != AUDIT_SCHEMA_VERSION:
-        raise ValueError("data audit is not the v3.1 audit contract")
+        raise ValueError("data audit is not the v4 audit contract")
     if audit.get("release_schema_version") != RELEASE_SCHEMA_VERSION:
         raise ValueError("data audit was generated for a different release schema")
-    if audit.get("status") != "passed" or audit.get("strict_failures"):
+    if audit.get("status") != "passed" or audit.get("failures"):
         raise ValueError(f"dataset release audit did not pass: {audit_path}")
     if stat.S_IMODE(audit_path.stat().st_mode) != 0o444:
         raise PermissionError(f"generated data audit must have mode 0444: {audit_path}")
-    if manifest_value.get("max_length") != CONTROLLED_MAX_LENGTH or audit.get("max_length") != CONTROLLED_MAX_LENGTH:
-        raise ValueError("v3.1 release and audit must enforce max_length=8192")
+    token_audit = audit.get("token_and_truncation", {})
+    if (
+        manifest_value.get("max_length") != CONTROLLED_MAX_LENGTH
+        or token_audit.get("max_length") != CONTROLLED_MAX_LENGTH
+    ):
+        raise ValueError("v4 release and audit must enforce max_length=8192")
     if manifest_value.get("primary_prompt_profile") != PRIMARY_PROMPT_PROFILE:
         raise ValueError("matrix requires the explicit-organism source-native primary profile")
-    if set(manifest_value.get("splits", {})) != set(PARTITIONS):
-        raise ValueError("dataset manifest must declare exactly five primary partitions")
-    if set(audit.get("splits", {})) != set(PARTITIONS):
-        raise ValueError("data audit must cover exactly five primary partitions")
+    manifest_outputs = manifest_value.get("outputs", {})
+    audit_outputs = audit.get("materialized_splits", {})
+    if set(manifest_outputs) != set(ALL_SPLITS):
+        raise ValueError("dataset manifest must declare exactly the five v4 splits")
+    if set(audit_outputs) != set(ALL_SPLITS):
+        raise ValueError("data audit must cover exactly the five v4 splits")
 
     def sha256(path: Path) -> str:
         digest = hashlib.sha256()
@@ -473,51 +480,55 @@ def validate_inputs(root: Path) -> None:
                 digest.update(chunk)
         return digest.hexdigest()
 
-    if sha256(manifest) != audit.get("manifest_sha256"):
-        raise ValueError("dataset manifest changed after data_audit.json was generated")
-    for split in PARTITIONS:
-        path = csv_files[split]
-        split_manifest = manifest_value["splits"][split]
-        split_audit = audit["splits"][split]
-        if split_manifest.get("prompt_profile") != PRIMARY_PROMPT_PROFILE:
-            raise ValueError(f"{split} manifest does not use the primary prompt profile")
-        if split_manifest.get("prompt_profile_interface_applied") is not True:
-            raise ValueError(f"{split} did not apply the prompt profile interface")
-        if split_manifest.get("prefix_horizon_interface_applied") is not True:
-            raise ValueError(f"{split} did not apply the prefix-horizon interface")
-        if split_audit.get("errors"):
-            raise ValueError(f"{split} has strict audit errors")
-        rows = split_audit.get("rows")
-        if not isinstance(rows, int) or rows < 1:
-            raise ValueError(f"{split} must contain at least one accepted row")
-        if split_audit.get("prompt_profiles") != {PRIMARY_PROMPT_PROFILE: rows}:
-            raise ValueError(f"{split} contains a non-primary or unaudited prompt profile")
-        truncation = split_audit.get("truncation_estimate", {})
-        if (
-            truncation.get("max_length") != CONTROLLED_MAX_LENGTH
-            or truncation.get("accepted_rows_over_budget") != 0
-        ):
-            raise ValueError(f"{split} violates the strict 8192-token release budget")
-        expected = split_audit.get("sha256")
-        if not expected or sha256(path) != expected:
-            raise ValueError(f"{split} CSV changed after data_audit.json was generated")
-        if split_manifest.get("csv_sha256") != expected:
-            raise ValueError(f"{split} CSV hash disagrees between manifest and audit")
-        record_expected = (
-            split_audit.get("record_jsonl", {}).get("sha256")
-        )
-        if not record_expected or sha256(record_files[split]) != record_expected:
-            raise ValueError(f"{split} record JSONL changed after data_audit.json was generated")
-        if split_manifest.get("records_sha256") != record_expected:
-            raise ValueError(f"{split} record JSONL hash disagrees between manifest and audit")
+    pinned_files = audit.get("hashes", {}).get("files", {})
+    if not isinstance(pinned_files, dict):
+        raise ValueError("data audit lacks the generated artifact hash table")
 
-    source_hash_report = audit.get("source_graph_hashes", {})
-    if source_hash_report.get("status") != "passed" or source_hash_report.get("errors"):
-        raise ValueError("source graph content-hash verification did not pass")
-    if sha256(source_graph_hashes) != source_hash_report.get("sha256"):
-        raise ValueError("source_graph_hashes.jsonl changed after the release audit")
+    def verify_pinned(path: Path) -> str:
+        relative = path.relative_to(dataset_root).as_posix()
+        declaration = pinned_files.get(relative, {})
+        expected = declaration.get("sha256") if isinstance(declaration, dict) else None
+        actual = sha256(path)
+        if not expected or actual != expected:
+            raise ValueError(f"release artifact changed after audit: {relative}")
+        if declaration.get("bytes") != path.stat().st_size:
+            raise ValueError(f"release artifact size changed after audit: {relative}")
+        return actual
+
+    verify_pinned(manifest)
+    for split in ALL_SPLITS:
+        csv_hash = verify_pinned(csv_files[split])
+        record_hash = verify_pinned(record_files[split])
+        manifest_split = manifest_outputs[split]
+        audit_split = audit_outputs[split]
+        rows = audit_split.get("rows")
+        if not isinstance(rows, int) or rows < 1 or audit_split.get("records") != rows:
+            raise ValueError(f"{split} must contain one unique record per accepted row")
+        if manifest_split.get("rows") != rows:
+            raise ValueError(f"{split} row count disagrees between manifest and audit")
+        if manifest_split.get("csv_file") != CSV_NAMES[split]:
+            raise ValueError(f"{split} manifest declares the wrong v4 CSV")
+        if manifest_split.get("records_file") != RECORD_NAMES[split]:
+            raise ValueError(f"{split} manifest declares the wrong v4 record JSONL")
+        if manifest_split.get("csv_sha256") != csv_hash or audit_split.get("csv_sha256") != csv_hash:
+            raise ValueError(f"{split} CSV hash disagrees between manifest and audit")
+        if (
+            manifest_split.get("records_sha256") != record_hash
+            or audit_split.get("records_sha256") != record_hash
+        ):
+            raise ValueError(f"{split} record JSONL hash disagrees between manifest and audit")
+        if audit_split.get("token_length", {}).get("max", CONTROLLED_MAX_LENGTH + 1) > CONTROLLED_MAX_LENGTH:
+            raise ValueError(f"{split} violates the strict 8192-token release budget")
+
+    source_inventory_hash = verify_pinned(source_graph_hashes)
     manifest_source_hashes = manifest_value.get("source_graph_hashes", {})
-    if manifest_source_hashes.get("sha256") != source_hash_report.get("sha256"):
+    audit_source_hashes = audit.get("graph_artifact_coverage", {}).get(
+        "selected_source_hashes", {}
+    )
+    if (
+        manifest_source_hashes.get("sha256") != source_inventory_hash
+        or audit_source_hashes.get("sha256") != source_inventory_hash
+    ):
         raise ValueError("source graph inventory hash disagrees between manifest and audit")
     graph_root_value = manifest_value.get("processed_graph_root")
     if not graph_root_value:
@@ -525,86 +536,82 @@ def validate_inputs(root: Path) -> None:
     graph_root = Path(str(graph_root_value))
     if not graph_root.is_dir():
         raise FileNotFoundError(graph_root)
-    live_source_report = verify_source_graph_hashes(graph_root, source_graph_hashes)
+    live_source_report = verify_source_graph_hashes_tsv(graph_root, source_graph_hashes)
     if live_source_report.get("errors"):
         raise ValueError("live source graph content hashes no longer match the release")
     if (
-        live_source_report.get("sha256") != source_hash_report.get("sha256")
-        or live_source_report.get("records") != source_hash_report.get("records")
+        live_source_report.get("sha256") != source_inventory_hash
+        or live_source_report.get("records") != audit_source_hashes.get("sources")
     ):
         raise ValueError("live source graph hash inventory disagrees with data_audit.json")
 
-    strict_overlap = audit.get("required_summary", {}).get("strict_overlap", {})
-    for (left, right), contract in OVERLAP_CONTRACT.items():
-        pair = f"{left}_vs_{right}"
-        report = strict_overlap.get(pair, {})
-        identity = report.get("identity_contract", {})
-        if not identity or any(result.get("passed") is not True for result in identity.values()):
-            raise ValueError(f"{pair} identity overlap contract did not pass")
-        biological = report.get("biological_contract", {})
-        for field, policy in contract.items():
-            result = biological.get(field, {})
-            if result.get("policy") != policy or result.get("passed") is not True:
-                raise ValueError(f"{pair} {field} overlap contract did not pass")
+    canonical_manifest = manifest_value.get("canonical_index", {})
+    canonical_audit = audit.get("canonical_index", {})
+    if canonical_audit.get("complete") is not True:
+        raise ValueError("full canonical index was not complete")
+    if canonical_manifest.get("sha256") != canonical_audit.get("database_sha256"):
+        raise ValueError("canonical index hash disagrees between manifest and audit")
+    inventory = canonical_audit.get("inventory", {})
+    if inventory.get("graph_files") != canonical_audit.get("summary", {}).get("graphs"):
+        raise ValueError("canonical index does not cover the complete graph inventory")
+    assignment_coverage = audit.get("canonical_assignment_coverage", {})
+    if (
+        assignment_coverage.get("unassigned_records") != 0
+        or assignment_coverage.get("assigned_records")
+        != canonical_audit.get("summary", {}).get("records")
+    ):
+        raise ValueError("canonical v4 records are not all assigned to one declared split")
+    source_holdout = audit.get("source_holdout", {})
+    if (
+        source_holdout.get("policy")
+        != "dataset_internal_coverage_quantile_stratified_source_holdout"
+        or source_holdout.get("claims_phylogenetic_balance") is not False
+    ):
+        raise ValueError("source holdout is not the declared data-internal v4 policy")
+    processed_coverage = audit.get("graph_artifact_coverage", {}).get(
+        "processed_text_counterparts", {}
+    )
+    if (
+        processed_coverage.get("status") != "complete"
+        or processed_coverage.get("checked_sources")
+        != audit_source_hashes.get("sources")
+        or processed_coverage.get("indexed_sources")
+        != processed_coverage.get("checked_sources")
+        or processed_coverage.get("missing_counterparts") != 0
+        or processed_coverage.get("unmatched_legacy_text_events") != 0
+        or processed_coverage.get("visible_legacy_text_events")
+        != processed_coverage.get("exact_legacy_text_matches")
+    ):
+        raise ValueError("selected v4 sources did not pass exact historical text reconciliation")
+    if any(int(value) for value in audit.get("duplicate_ids", {}).values()):
+        raise ValueError("v4 release contains duplicate canonical or materialized identities")
+    strict_overlap = audit.get("strict_overlap", {})
+    for pair, values in strict_overlap.items():
+        if any(values.get(identity, 0) for identity in ("samples", "records", "graphs", "views", "sources")):
+            raise ValueError(f"{pair} strict identity overlap contract did not pass")
+    for split, report in audit.get("horizon_balance", {}).items():
+        if report.get("actual_matches_theoretical_optimum") is not True:
+            raise ValueError(f"{split} horizon assignment is not globally optimal")
 
-    paired_manifest = manifest_value.get("paired_prompt_profiles", {})
-    paired_files = paired_manifest.get("files", {})
     expected_controls = (
         NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
         SPECIES_NEUTRAL_IDS_NO_ORGANISM,
     )
-    if (
-        paired_manifest.get("status") != "published"
-        or paired_manifest.get("published") is not True
-        or set(paired_files) != set(expected_controls)
-    ):
-        raise ValueError("v3.1 release must publish canonical P1 and strict-natural P2 controls")
-    paired_audit = audit.get("paired_prompt_profiles", {})
-    if (
-        paired_audit.get("status") != "passed"
-        or paired_audit.get("manifest_published") is not True
-        or paired_audit.get("canonical_files_match_prompt_controls") is not True
-    ):
-        raise ValueError("paired prompt-profile audit did not pass")
-    reports = paired_audit.get("declared_file_reports", {})
-    checks = paired_audit.get("pair_checks", {})
-    for profile in expected_controls:
-        partition_files = paired_files.get(profile, {})
-        if set(partition_files) != set(PARTITIONS):
-            raise ValueError(f"{profile} must publish all five primary partitions")
-        for partition in PARTITIONS:
-            metadata = partition_files[partition]
-            if not isinstance(metadata, dict) or not metadata.get("path"):
-                raise ValueError(f"{profile}:{partition} has no canonical file metadata")
-            control_path = dataset_root / str(metadata["path"])
+    for split in ALL_SPLITS:
+        controls = audit_outputs[split].get("prompt_controls", {})
+        files = controls.get("files", {})
+        if set(files) != set(expected_controls):
+            raise ValueError(f"{split} must publish both P1 and strict-natural P2 controls")
+        for profile in expected_controls:
+            metadata = files[profile]
+            control_path = dataset_root / str(metadata.get("path", ""))
             if not control_path.is_file():
                 raise FileNotFoundError(control_path)
-            expected_hash = metadata.get("sha256") or metadata.get("csv_sha256")
-            report = reports.get(f"{profile}:{partition}", {})
-            actual_hash = sha256(control_path)
-            if not expected_hash or actual_hash != expected_hash or report.get("sha256") != actual_hash:
-                raise ValueError(f"{profile}:{partition} control CSV hash verification failed")
-            if report.get("errors") or not isinstance(report.get("rows"), int) or report["rows"] < 1:
-                raise ValueError(f"{profile}:{partition} control CSV did not pass row auditing")
-
-    for partition in PARTITIONS:
-        p1_key = (
-            f"{partition}:{PRIMARY_PROMPT_PROFILE}_vs_"
-            f"{NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS}"
-        )
-        p2_key = (
-            f"{partition}:{PRIMARY_PROMPT_PROFILE}_vs_"
-            f"{SPECIES_NEUTRAL_IDS_NO_ORGANISM}"
-        )
-        p1 = checks.get(p1_key, {})
-        p2 = checks.get(p2_key, {})
-        if p1.get("passed") is not True or p1.get("base_sample_policy") != "exact_primary_set":
-            raise ValueError(f"{partition} P0/P1 exact pairing contract did not pass")
-        if (
-            p2.get("passed") is not True
-            or p2.get("base_sample_policy") != "strict_natural_neutral_subset"
-        ):
-            raise ValueError(f"{partition} P2 strict-natural subset contract did not pass")
+            actual = verify_pinned(control_path)
+            if metadata.get("sha256") != actual:
+                raise ValueError(f"{profile}:{split} control CSV hash verification failed")
+        if controls.get("p1_rows") != audit_outputs[split].get("rows"):
+            raise ValueError(f"{split} P0/P1 exact pairing contract did not pass")
 
 
 def run_scheduler(

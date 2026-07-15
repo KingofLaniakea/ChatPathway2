@@ -112,6 +112,122 @@ def _v3_entity_valid(value: Any) -> bool:
     )
 
 
+def _v4_entity_valid(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "canonical_id",
+        "aliases",
+        "name",
+    }:
+        return False
+    canonical_id = value.get("canonical_id")
+    aliases = value.get("aliases")
+    return (
+        isinstance(canonical_id, str)
+        and bool(canonical_id.strip())
+        and isinstance(aliases, list)
+        and all(isinstance(alias, str) and alias.strip() for alias in aliases)
+        and len(set(aliases)) == len(aliases)
+        and canonical_id not in aliases
+        and isinstance(value.get("name"), str)
+        and bool(value["name"].strip())
+    )
+
+
+def _v4_action_valid(value: Any, event_type: Any) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "kind",
+        "relation_class",
+        "subtypes",
+        "reversibility",
+    }:
+        return False
+    subtypes = value.get("subtypes")
+    if (
+        not isinstance(subtypes, list)
+        or not all(isinstance(item, str) and item.strip() for item in subtypes)
+        or len(set(subtypes)) != len(subtypes)
+    ):
+        return False
+    if event_type == "reaction":
+        return (
+            value.get("kind") == "conversion"
+            and value.get("relation_class") is None
+            and subtypes == []
+            and value.get("reversibility") in {"reversible", "irreversible"}
+        )
+    return (
+        event_type == "relation"
+        and value.get("kind") == "relation"
+        and isinstance(value.get("relation_class"), str)
+        and bool(value["relation_class"].strip())
+        and value.get("reversibility") is None
+    )
+
+
+def _v4_layer_from_value(value: Any, position: int) -> tuple[PathwayStepValue | None, bool]:
+    if not isinstance(value, dict):
+        return None, False
+    layer_index = value.get("layer_index")
+    events = value.get("events")
+    shape_valid = (
+        set(value) == {"layer_index", "events"}
+        and isinstance(layer_index, int)
+        and not isinstance(layer_index, bool)
+        and isinstance(events, list)
+        and bool(events)
+    )
+    if not isinstance(events, list):
+        return None, False
+    texts: list[str] = []
+    events_valid = True
+    for event in events:
+        if not isinstance(event, dict):
+            events_valid = False
+            continue
+        event_type = event.get("event_type")
+        sources = event.get("source")
+        mediators = event.get("mediators")
+        targets = event.get("target")
+        text = str(event.get("text", "")).strip()
+        event_valid = (
+            set(event)
+            == {"event_type", "source", "action", "mediators", "target", "text"}
+            and event_type in {"relation", "reaction"}
+            and isinstance(sources, list)
+            and bool(sources)
+            and all(_v4_entity_valid(item) for item in sources)
+            and isinstance(mediators, list)
+            and all(_v4_entity_valid(item) for item in mediators)
+            and isinstance(targets, list)
+            and bool(targets)
+            and all(_v4_entity_valid(item) for item in targets)
+            and _v4_action_valid(event.get("action"), event_type)
+            and isinstance(event.get("text"), str)
+            and bool(text)
+        )
+        events_valid = events_valid and event_valid
+        if text:
+            texts.append(text)
+    if not texts:
+        return None, False
+    step_number = (
+        layer_index
+        if isinstance(layer_index, int) and not isinstance(layer_index, bool)
+        else None
+    )
+    layer = f"layer {step_number}" if step_number is not None else ""
+    return (
+        PathwayStepValue(
+            position=position,
+            step=step_number,
+            layer=layer,
+            text=" ".join(texts),
+            substeps=tuple(texts),
+        ),
+        shape_valid and events_valid and len(texts) == len(events),
+    )
+
+
 def _v3_layer_from_value(value: Any, position: int) -> tuple[PathwayStepValue | None, bool]:
     if not isinstance(value, dict):
         return None, False
@@ -168,7 +284,7 @@ def _v3_layer_from_value(value: Any, position: int) -> tuple[PathwayStepValue | 
 
 
 def parse_pathway_payload(value: Any, *, allow_text_fallback: bool = True) -> ParsedPathwayPayload:
-    """Parse v3 ``remaining_layers``, v2 ``remaining_steps``, and old shapes.
+    """Parse v4/v3 ``remaining_layers``, v2 steps, and historical shapes.
 
     ``json_valid`` is true only for syntactically valid JSON. ``schema_valid``
     additionally requires the maintained object shape and structured step
@@ -208,15 +324,22 @@ def parse_pathway_payload(value: Any, *, allow_text_fallback: bool = True) -> Pa
                     False,
                     "remaining_layers_is_not_list",
                 )
+            schema_version = loaded.get("schema_version")
             schema_valid = (
                 set(loaded) == {"schema_version", "remaining_layers"}
-                and loaded.get("schema_version") == "pathway_continuation_v3"
+                and schema_version
+                in {"pathway_continuation_v4", "pathway_continuation_v3"}
                 and bool(raw_layers)
             )
             parsed_layers: list[PathwayStepValue] = []
             previous_layer_index: int | None = None
             for position, raw_layer in enumerate(raw_layers):
-                layer, layer_schema_valid = _v3_layer_from_value(raw_layer, position)
+                layer_parser = (
+                    _v4_layer_from_value
+                    if schema_version == "pathway_continuation_v4"
+                    else _v3_layer_from_value
+                )
+                layer, layer_schema_valid = layer_parser(raw_layer, position)
                 if layer is None:
                     schema_valid = False
                     continue

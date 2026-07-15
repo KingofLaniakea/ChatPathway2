@@ -272,6 +272,27 @@ class GraphSelectionTests(unittest.TestCase):
             finally:
                 database.close()
 
+    def test_candidate_database_index_satisfies_family_rank_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = builder.initialize_database(
+                Path(directory) / "candidates.sqlite3"
+            )
+            try:
+                plan = "\n".join(
+                    str(row[-1])
+                    for row in database.execute(
+                        "EXPLAIN QUERY PLAN "
+                        "SELECT record_id, organism, graph_id, source_graph_json, "
+                        "layer_count, rank, record_json FROM candidates "
+                        "WHERE split=? AND family=? ORDER BY rank",
+                        ("train", "00010"),
+                    )
+                )
+                self.assertIn("candidates_split_family_rank", plan)
+                self.assertNotIn("USE TEMP B-TREE", plan)
+            finally:
+                database.close()
+
 
 class ParallelGraphScanTests(unittest.TestCase):
     def scan_snapshot(

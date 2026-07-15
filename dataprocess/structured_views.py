@@ -171,6 +171,155 @@ def _event_sort_key(event: StructuredEvent) -> tuple[int, int, str]:
     )
 
 
+def _merge_endpoint_provenance(
+    events: Iterable[StructuredEvent],
+    *,
+    node_ids_attribute: str,
+    provenance_attribute: str,
+) -> tuple[tuple[int, ...], tuple[dict[str, object], ...]]:
+    """Union occurrence-node provenance without duplicating model entities."""
+
+    by_node_id: dict[int, dict[str, object]] = {}
+    for event in events:
+        node_ids = getattr(event, node_ids_attribute)
+        provenance = getattr(event, provenance_attribute)
+        if len(node_ids) != len(provenance):
+            raise ValueError("event endpoint IDs and provenance lengths disagree")
+        for node_id, value in zip(node_ids, provenance):
+            materialized = dict(value)
+            prior = by_node_id.get(node_id)
+            if prior is not None and prior != materialized:
+                raise ValueError(
+                    f"node_id={node_id} has conflicting event provenance"
+                )
+            by_node_id[node_id] = materialized
+    ordered_ids = tuple(sorted(by_node_id))
+    return ordered_ids, tuple(by_node_id[node_id] for node_id in ordered_ids)
+
+
+def _merge_semantic_events(events: Iterable[StructuredEvent]) -> StructuredEvent:
+    """Merge model-identical raw occurrences assigned to the same layer.
+
+    Occurrence nodes may be duplicated on a KEGG map even when their resolved
+    participants and biological action are identical.  They must remain
+    separate until SCC/layer assignment, because occurrence topology differs;
+    only then can the model-visible duplicate be collapsed.  All producer IDs
+    and occurrence-node provenance remain in the canonical record.
+    """
+
+    ordered = tuple(sorted(events, key=_event_sort_key))
+    if not ordered:
+        raise ValueError("cannot merge an empty semantic-event group")
+    first = ordered[0]
+    if any(event.semantic_event_id != first.semantic_event_id for event in ordered):
+        raise ValueError("semantic-event merge group contains different identities")
+    if any(event.model_object() != first.model_object() for event in ordered):
+        raise ValueError("semantic-event identity collision changes model-visible content")
+    if any(not event.core_included for event in ordered):
+        raise ValueError("excluded events cannot be merged into a model-visible layer")
+
+    source_node_ids, source_provenance = _merge_endpoint_provenance(
+        ordered,
+        node_ids_attribute="source_node_ids",
+        provenance_attribute="source_entity_provenance",
+    )
+    target_node_ids, target_provenance = _merge_endpoint_provenance(
+        ordered,
+        node_ids_attribute="target_node_ids",
+        provenance_attribute="target_entity_provenance",
+    )
+    mediator_node_ids, mediator_provenance = _merge_endpoint_provenance(
+        ordered,
+        node_ids_attribute="mediator_node_ids",
+        provenance_attribute="mediator_entity_provenance",
+    )
+
+    producer_event_ids: list[str] = []
+    producer_renderable_event_ids: list[str] = []
+    reaction_names: list[str] = []
+    raw_subtypes: list[dict[str, str]] = []
+    seen_raw_subtypes: set[tuple[str, str]] = set()
+    for event in ordered:
+        for producer_event_id in event.producer_event_ids:
+            if producer_event_id in producer_event_ids:
+                raise ValueError(
+                    f"duplicate producer event ID {producer_event_id!r} during merge"
+                )
+            producer_event_ids.append(producer_event_id)
+        for producer_event_id in event.producer_renderable_event_ids:
+            if producer_event_id in producer_renderable_event_ids:
+                raise ValueError(
+                    f"duplicate renderable producer ID {producer_event_id!r} during merge"
+                )
+            producer_renderable_event_ids.append(producer_event_id)
+        for reaction_name in event.raw_reaction_names:
+            if reaction_name not in reaction_names:
+                reaction_names.append(reaction_name)
+        for subtype in event.raw_subtypes:
+            key = (str(subtype["name"]), str(subtype["value"]))
+            if key not in seen_raw_subtypes:
+                seen_raw_subtypes.add(key)
+                raw_subtypes.append(dict(subtype))
+
+    legacy_texts = {
+        event.legacy_text for event in ordered if event.legacy_text is not None
+    }
+    if len(legacy_texts) > 1:
+        raise ValueError("semantic duplicates disagree on legacy event text")
+    legacy_text = next(iter(legacy_texts), None)
+    if legacy_text is not None:
+        text_source = next(
+            event.text_source for event in ordered if event.legacy_text is not None
+        )
+    else:
+        text_source = first.text_source
+
+    roles = {event.topology_role for event in ordered}
+    if TOPOLOGY_BACKBONE in roles:
+        topology_role = TOPOLOGY_BACKBONE
+    elif TOPOLOGY_CONTEXT_CROSS_LAYER in roles:
+        topology_role = TOPOLOGY_CONTEXT_CROSS_LAYER
+    else:
+        topology_role = TOPOLOGY_CONTEXT
+    topology_arcs = tuple(
+        sorted({arc for event in ordered for arc in event.topology_arcs})
+    )
+    if topology_role != TOPOLOGY_BACKBONE:
+        topology_arcs = ()
+
+    return replace(
+        first,
+        event_id=producer_event_ids[0],
+        producer_event_ids=tuple(producer_event_ids),
+        producer_renderable_event_ids=tuple(producer_renderable_event_ids),
+        source_node_ids=source_node_ids,
+        target_node_ids=target_node_ids,
+        source_entity_provenance=source_provenance,
+        target_entity_provenance=target_provenance,
+        mediator_node_ids=mediator_node_ids,
+        mediator_entity_provenance=mediator_provenance,
+        legacy_text=legacy_text,
+        text_source=text_source,
+        producer_renderable_count=len(producer_renderable_event_ids),
+        raw_reaction_names=tuple(reaction_names),
+        raw_subtypes=tuple(raw_subtypes),
+        topology_role=topology_role,
+        topology_arcs=topology_arcs,
+        core_included=True,
+        exclusion_reason="",
+    )
+
+
+def _deduplicate_layer_events(
+    events: Iterable[StructuredEvent],
+) -> tuple[StructuredEvent, ...]:
+    grouped: dict[str, list[StructuredEvent]] = defaultdict(list)
+    for event in events:
+        grouped[event.semantic_event_id].append(event)
+    merged = (_merge_semantic_events(group) for group in grouped.values())
+    return tuple(sorted(merged, key=_event_sort_key))
+
+
 def build_structured_records(
     graph: dict[str, Any],
     *,
@@ -296,7 +445,7 @@ def build_structured_records(
                 StructuredLayer(
                     layer_index=normalized_index,
                     distance_to_sink=raw_distances[raw_index],
-                    events=tuple(sorted(raw_layers[raw_index], key=_event_sort_key)),
+                    events=_deduplicate_layer_events(raw_layers[raw_index]),
                 )
             )
         if not layers:

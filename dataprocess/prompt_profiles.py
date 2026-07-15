@@ -37,11 +37,11 @@ PROMPT_PROFILE_METADATA: dict[str, dict[str, str]] = {
     SPECIES_NEUTRAL_IDS_NO_ORGANISM: {
         "organism_conditioning": "absent_after_neutralization",
         "entity_id_space": "species_neutral_kegg",
-        "entity_mapping_status": "complete",
+        "entity_mapping_status": "complete_identity_only_neutral_projection",
     },
 }
 
-PATHWAY_CONTINUATION_SCHEMA_VERSION = "pathway_continuation_v3"
+PATHWAY_CONTINUATION_SCHEMA_VERSION = "pathway_continuation_v4"
 
 _FORBIDDEN_MODEL_METADATA_KEYS = frozenset(
     {
@@ -74,18 +74,60 @@ def _forbidden_keys(value: object) -> set[str]:
     return found
 
 
-def _canonical_ids(value: object) -> list[str]:
+def _entity_ids(value: object) -> list[str]:
     output: list[str] = []
     if isinstance(value, Mapping):
         canonical_id = value.get("canonical_id")
         if isinstance(canonical_id, str) and canonical_id.strip():
             output.append(canonical_id.strip())
+        aliases = value.get("aliases")
+        if isinstance(aliases, list):
+            output.extend(
+                alias.strip()
+                for alias in aliases
+                if isinstance(alias, str) and alias.strip()
+            )
         for item in value.values():
-            output.extend(_canonical_ids(item))
+            output.extend(_entity_ids(item))
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         for item in value:
-            output.extend(_canonical_ids(item))
+            output.extend(_entity_ids(item))
     return output
+
+
+def _neutral_projection_issues(value: object) -> set[str]:
+    issues: set[str] = set()
+    if isinstance(value, Mapping):
+        canonical_id = value.get("canonical_id")
+        if isinstance(canonical_id, str):
+            if value.get("name") != canonical_id:
+                issues.add("entity_name_not_neutral_id")
+        if "event_type" in value and "source" in value and "target" in value:
+            text = value.get("text")
+            if not isinstance(text, str):
+                issues.add("event_text_missing")
+            else:
+                participants = [
+                    entity.get("canonical_id")
+                    for side in ("source", "mediators", "target")
+                    for entity in (
+                        value.get(side)
+                        if isinstance(value.get(side), list)
+                        else []
+                    )
+                    if isinstance(entity, Mapping)
+                    and isinstance(entity.get("canonical_id"), str)
+                ]
+                for identifier in participants:
+                    if identifier not in text:
+                        issues.add("event_text_contains_non_neutral_surface")
+                        break
+        for item in value.values():
+            issues.update(_neutral_projection_issues(item))
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            issues.update(_neutral_projection_issues(item))
+    return issues
 
 
 def _output_skeleton(next_layer_index: int) -> str:
@@ -96,21 +138,55 @@ def _output_skeleton(next_layer_index: int) -> str:
                 "layer_index": next_layer_index,
                 "events": [
                     {
+                        "event_type": "relation",
                         "source": [
                             {
                                 "canonical_id": "<source canonical ID>",
+                                "aliases": ["<optional resolved alias ID>"],
                                 "name": "<source name>",
                             }
                         ],
-                        "relation": "<controlled relation label>",
+                        "action": {
+                            "kind": "relation",
+                            "relation_class": "<ECrel|PPrel|GErel|PCrel|maplink>",
+                            "subtypes": ["<KEGG subtype annotation>"],
+                            "reversibility": None,
+                        },
+                        "mediators": [],
                         "target": [
                             {
                                 "canonical_id": "<target canonical ID>",
+                                "aliases": [],
                                 "name": "<target name>",
                             }
                         ],
                         "text": "<biological relation sentence>",
-                    }
+                    },
+                    {
+                        "event_type": "reaction",
+                        "source": [
+                            {
+                                "canonical_id": "<substrate canonical ID>",
+                                "aliases": [],
+                                "name": "<substrate name>",
+                            }
+                        ],
+                        "action": {
+                            "kind": "conversion",
+                            "relation_class": None,
+                            "subtypes": [],
+                            "reversibility": "<reversible|irreversible>",
+                        },
+                        "mediators": [],
+                        "target": [
+                            {
+                                "canonical_id": "<product canonical ID>",
+                                "aliases": [],
+                                "name": "<product name>",
+                            }
+                        ],
+                        "text": "<biological conversion sentence>",
+                    },
                 ],
             }
         ],
@@ -161,17 +237,23 @@ def render_pathway_question(
         prefix = f"{organism_value.casefold()}:"
         leaked_ids = [
             value
-            for value in _canonical_ids(observed_payload)
+            for value in _entity_ids(observed_payload)
             if value.casefold().startswith(prefix)
         ]
         if leaked_ids:
             raise ValueError(
                 "species-neutral profile contains source-native organism-prefixed IDs"
             )
+        neutral_issues = _neutral_projection_issues(observed_payload)
+        if neutral_issues:
+            raise ValueError(
+                "species-neutral profile was not fully neutralized: "
+                + ", ".join(sorted(neutral_issues))
+            )
 
     lines = ["Continue the biological mechanism from the observed upstream layers."]
     if profile == EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS:
-        lines.extend(("", f"Organism (KEGG code): {organism_value}"))
+        lines.extend(("", f"Organism/source context (KEGG code): {organism_value}"))
     lines.extend(
         (
             "",
@@ -180,7 +262,9 @@ def render_pathway_question(
             f"The first remaining layer must use layer_index {next_layer_index}; "
             "each later layer must increase it by 1.",
             "Use the exact key structure below, replacing placeholder strings and "
-            "including as many layers, events, and entities as required.",
+            "including as many layers, events, and entities as required. The two "
+            "event objects illustrate relation and reaction variants; include only "
+            "events supported by the observed mechanism.",
             "",
             "Required output JSON format:",
             _output_skeleton(next_layer_index),

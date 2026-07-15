@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from dataprocess.event_text import audited_reaction_text, audited_relation_text
 from dataprocess.prompt_profiles import (
     EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
     NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
@@ -124,9 +125,12 @@ def _result(
 ) -> ProjectionResult:
     reason_counts = dict(sorted(reasons.items()))
     eligible = not reason_counts
+    projected = copy.deepcopy(dict(value)) if eligible else None
+    if projected is not None and profile == SPECIES_NEUTRAL_IDS_NO_ORGANISM:
+        _neutralize_projected_payload(projected)
     return ProjectionResult(
         profile=profile,
-        projected=copy.deepcopy(dict(value)) if eligible else None,
+        projected=projected,
         eligibility=Eligibility(
             eligible=eligible,
             rejection_reason_counts=reason_counts,
@@ -218,6 +222,13 @@ def _assess_name(name: object, organism: str, reasons: Counter[str]) -> None:
             reasons["name_contains_invalid_neutral_id"] += 1
 
 
+def _assess_name_shape(name: object, reasons: Counter[str]) -> None:
+    if not isinstance(name, str) or not name.strip():
+        reasons["missing_entity_name"] += 1
+    elif name != name.strip():
+        reasons["invalid_entity_name_format"] += 1
+
+
 def _assess_entity(
     entity: object,
     organism: str,
@@ -228,10 +239,27 @@ def _assess_entity(
         reasons["malformed_entity"] += 1
         return
     canonical_id = entity.get("canonical_id")
+    aliases = entity.get("aliases")
     name = entity.get("name")
+    if set(entity) != {"canonical_id", "aliases", "name"}:
+        reasons["unexpected_entity_keys"] += 1
+    if not isinstance(aliases, list) or not all(
+        isinstance(alias, str) and alias.strip() for alias in aliases
+    ):
+        reasons["malformed_entity_aliases"] += 1
+        aliases = []
+    elif len(set(aliases)) != len(aliases):
+        reasons["duplicate_entity_aliases"] += 1
+    if isinstance(canonical_id, str) and canonical_id in aliases:
+        reasons["canonical_id_repeated_as_alias"] += 1
     if profile == SPECIES_NEUTRAL_IDS_NO_ORGANISM:
         _assess_canonical_id(canonical_id, organism, reasons)
-        _assess_name(name, organism, reasons)
+        for alias in aliases:
+            _assess_canonical_id(alias, organism, reasons)
+        # Source-native names are not trusted as species-neutral.  Eligibility
+        # only requires a valid shape; the successful P2 projection below
+        # replaces every name and event sentence with neutral-ID text.
+        _assess_name_shape(name, reasons)
         return
     if not isinstance(canonical_id, str) or not canonical_id.strip():
         reasons["missing_canonical_id"] += 1
@@ -245,6 +273,8 @@ def _assess_entity_side(
     organism: str,
     profile: str,
     reasons: Counter[str],
+    *,
+    allow_empty: bool = False,
 ) -> None:
     entities = event.get(side)
     if not isinstance(entities, Sequence) or isinstance(
@@ -252,7 +282,7 @@ def _assess_entity_side(
     ):
         reasons[f"malformed_{side}_entities"] += 1
         return
-    if not entities:
+    if not entities and not allow_empty:
         reasons[f"empty_{side}_entities"] += 1
         return
     for entity in entities:
@@ -270,6 +300,14 @@ def _assess_event(
         return
     _assess_entity_side(event, "source", organism, profile, reasons)
     _assess_entity_side(event, "target", organism, profile, reasons)
+    _assess_entity_side(
+        event,
+        "mediators",
+        organism,
+        profile,
+        reasons,
+        allow_empty=True,
+    )
 
 
 def _collect_events(
@@ -301,6 +339,68 @@ def _collect_events(
     ):
         for item in value:
             _collect_events(item, events, reasons)
+
+
+def _neutralize_projected_payload(value: dict[str, Any]) -> None:
+    events: list[object] = []
+    reasons: Counter[str] = Counter()
+    _collect_events(value, events, reasons)
+    if reasons or not events:
+        raise ValueError("eligible neutral projection has malformed event structure")
+    for raw_event in events:
+        if not isinstance(raw_event, dict):
+            raise ValueError("eligible neutral projection contains a non-object event")
+        for side in ("source", "mediators", "target"):
+            entities = raw_event.get(side)
+            if not isinstance(entities, list):
+                raise ValueError("eligible neutral projection contains malformed entities")
+            for entity in entities:
+                if not isinstance(entity, dict):
+                    raise ValueError("eligible neutral projection contains malformed entity")
+                entity["name"] = str(entity["canonical_id"])
+        source = raw_event["source"]
+        mediators = raw_event["mediators"]
+        target = raw_event["target"]
+        action = raw_event.get("action")
+        if not isinstance(action, Mapping):
+            raise ValueError("eligible neutral projection lacks a structured action")
+        event_type = raw_event.get("event_type")
+        if event_type == "relation":
+            relation_class = action.get("relation_class")
+            subtypes = action.get("subtypes")
+            if not isinstance(relation_class, str) or not isinstance(subtypes, list):
+                raise ValueError("eligible neutral relation action is malformed")
+            text, _legacy, _source = audited_relation_text(
+                relation_class=relation_class,
+                subtypes=subtypes,
+                sources=source,
+                targets=target,
+                mediators=mediators,
+            )
+        elif event_type == "reaction":
+            reversibility = action.get("reversibility")
+            if not isinstance(reversibility, str):
+                raise ValueError("eligible neutral reaction action is malformed")
+            text, _legacy, _source = audited_reaction_text(
+                reversibility=reversibility,
+                sources=source,
+                targets=target,
+            )
+        else:
+            raise ValueError("eligible neutral projection has an unknown event type")
+        identifiers = [
+            str(entity["canonical_id"])
+            for side in (source, mediators, target)
+            for entity in side
+        ]
+        for identifier in sorted(set(identifiers), key=len, reverse=True):
+            text = re.sub(
+                re.escape(identifier),
+                lambda _match, replacement=identifier: replacement,
+                text,
+                flags=re.IGNORECASE,
+            )
+        raw_event["text"] = text
 
 
 def project_event(

@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from dataprocess.release_contract import (
+from dataprocess.release_contract_v4 import (
+    ALL_SPLITS,
     AUDIT_SCHEMA_VERSION,
-    PRIMARY_CSV_NAMES,
+    CSV_NAMES,
     PRIMARY_PROMPT_PROFILE,
-    RECORD_JSONL_NAMES,
+    RECORD_NAMES,
     RELEASE_SCHEMA_VERSION,
     SOURCE_GRAPH_HASHES_NAME,
 )
@@ -35,18 +36,18 @@ POST_CURRENT_GENERATION_IDS = {
     "plan012_token_resolution_stepwise",
     "plan013_multiscale_hybrid_generation",
 }
-EXPECTED_DIAGNOSTIC_PARTITIONS = ("test", "test_family_only", "test_organism_only")
+EXPECTED_DIAGNOSTIC_PARTITIONS = ("test", "test_organism", "test_strict")
 
 
 def validate_dataset_profile(matrix: dict[str, Any]) -> list[str]:
-    """Keep the human-readable matrix aligned with the enforced v3.1 release."""
+    """Keep the human-readable matrix aligned with the enforced v4 release."""
 
     errors: list[str] = []
     profile = matrix.get("dataset_profile", {})
-    expected_root = "data/pathway_v3_cap256"
+    expected_root = "data/pathway_v4_full"
     expected_paths = {
-        "train": f"{expected_root}/{PRIMARY_CSV_NAMES['train']}",
-        "validation": f"{expected_root}/{PRIMARY_CSV_NAMES['validation']}",
+        "train": f"{expected_root}/{CSV_NAMES['train']}",
+        "validation": f"{expected_root}/{CSV_NAMES['validation']}",
     }
     for name, expected in expected_paths.items():
         if profile.get(name) != expected:
@@ -56,18 +57,18 @@ def validate_dataset_profile(matrix: dict[str, Any]) -> list[str]:
         errors.append("dataset_profile.diagnostic_tests must declare all three test partitions")
     else:
         for partition in EXPECTED_DIAGNOSTIC_PARTITIONS:
-            expected = f"{expected_root}/{PRIMARY_CSV_NAMES[partition]}"
+            expected = f"{expected_root}/{CSV_NAMES[partition]}"
             if not str(diagnostics[partition]).startswith(expected):
                 errors.append(
                     f"dataset_profile.diagnostic_tests.{partition} must start with {expected!r}"
                 )
     records = profile.get("record_jsonl", {})
     expected_records = {
-        partition: f"{expected_root}/{filename}"
-        for partition, filename in RECORD_JSONL_NAMES.items()
+        partition: f"{expected_root}/{RECORD_NAMES[partition]}"
+        for partition in ALL_SPLITS
     }
     if records != expected_records:
-        errors.append("dataset_profile.record_jsonl does not match the five v3.1 record files")
+        errors.append("dataset_profile.record_jsonl does not match the five v4 record files")
     checks = {
         "release_schema": RELEASE_SCHEMA_VERSION,
         "audit_schema": AUDIT_SCHEMA_VERSION,
@@ -80,7 +81,7 @@ def validate_dataset_profile(matrix: dict[str, Any]) -> list[str]:
         if profile.get(field) != expected:
             errors.append(f"dataset_profile.{field} must be {expected!r}")
     if matrix.get("sequence_budget", {}).get("max_length") != 8192:
-        errors.append("sequence_budget.max_length must remain 8192 for release v3.1")
+        errors.append("sequence_budget.max_length must remain 8192 for release v4")
     return errors
 
 

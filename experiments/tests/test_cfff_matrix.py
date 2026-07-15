@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import csv
 import hashlib
 import json
 import tempfile
@@ -9,16 +10,19 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from dataprocess.release_contract import (
+from dataprocess.release_contract_v4 import (
+    ALL_SPLITS,
+    AUDIT_NAME,
     AUDIT_SCHEMA_VERSION,
-    OVERLAP_CONTRACT,
-    PARTITIONS,
-    PRIMARY_CSV_NAMES,
+    CSV_NAMES,
+    MANIFEST_NAME,
     PRIMARY_PROMPT_PROFILE,
-    RECORD_JSONL_NAMES,
+    RECORD_NAMES,
     RELEASE_SCHEMA_VERSION,
     SOURCE_GRAPH_HASHES_NAME,
+    SPLIT_ASSIGNMENTS_NAME,
 )
+from dataprocess.structured_schema import graph_id_for_source
 from dataprocess.prompt_profiles import (
     NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
     SPECIES_NEUTRAL_IDS_NO_ORGANISM,
@@ -44,163 +48,199 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
         (model / "chatpathway_download_manifest.json").write_text(
             "{}\n", encoding="utf-8"
         )
-        data = root / "data/pathway_v3_cap256"
+        data = root / "data/pathway_v4_full"
         data.mkdir(parents=True)
         csv_paths = {
-            split: data / PRIMARY_CSV_NAMES[split]
-            for split in PARTITIONS
+            split: data / CSV_NAMES[split] for split in ALL_SPLITS
         }
         record_paths = {
-            split: data / RECORD_JSONL_NAMES[split]
-            for split in PARTITIONS
+            split: data / RECORD_NAMES[split] for split in ALL_SPLITS
         }
-        split_manifest = {}
-        split_audit = {}
-        for split in PARTITIONS:
+        graph_root = root / "KEGG_all_new/processed_graph"
+        graph_root.mkdir(parents=True)
+        graph = graph_root / "org/a.json"
+        graph.parent.mkdir(parents=True)
+        graph.write_text('{"graph":true}\n', encoding="utf-8")
+        graph_raw = graph.read_bytes()
+        source_hashes = data / SOURCE_GRAPH_HASHES_NAME
+        with source_hashes.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+            writer.writerow(["source_graph_json", "graph_id", "sha256", "bytes", "status"])
+            writer.writerow(
+                [
+                    "org/a.json",
+                    graph_id_for_source("org/a.json", graph_raw),
+                    hashlib.sha256(graph_raw).hexdigest(),
+                    len(graph_raw),
+                    "ok",
+                ]
+            )
+        source_sha = self._digest(source_hashes)
+        split_assignments = data / SPLIT_ASSIGNMENTS_NAME
+        split_assignments.write_text("{}\n", encoding="utf-8")
+        split_assignments.chmod(0o444)
+
+        outputs = {}
+        audit_outputs = {}
+        for split in ALL_SPLITS:
             csv_paths[split].write_text(f"{split}\n", encoding="utf-8")
             record_paths[split].write_text(
                 f'{{"split":"{split}"}}\n', encoding="utf-8"
             )
             csv_sha = self._digest(csv_paths[split])
             record_sha = self._digest(record_paths[split])
-            split_manifest[split] = {
-                "csv_sha256": csv_sha,
-                "records_sha256": record_sha,
-                "prompt_profile": PRIMARY_PROMPT_PROFILE,
-                "prompt_profile_interface_applied": True,
-                "prefix_horizon_interface_applied": True,
-            }
-            split_audit[split] = {
-                "sha256": csv_sha,
-                "rows": 1,
-                "errors": [],
-                "prompt_profiles": {PRIMARY_PROMPT_PROFILE: 1},
-                "truncation_estimate": {
-                    "max_length": 8192,
-                    "accepted_rows_over_budget": 0,
-                },
-                "record_jsonl": {"sha256": record_sha},
-            }
-        graph_root = root / "KEGG_all_new/processed_graph"
-        graph_root.mkdir(parents=True)
-        graph = graph_root / "a.json"
-        graph.write_text('{"graph":true}\n', encoding="utf-8")
-        source_hashes = data / SOURCE_GRAPH_HASHES_NAME
-        source_hashes.write_text(
-            json.dumps(
-                {
-                    "source_graph_json": "a.json",
-                    "bytes": graph.stat().st_size,
-                    "sha256": self._digest(graph),
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        source_sha = self._digest(source_hashes)
-        control_files = {}
-        control_reports = {}
-        pair_checks = {}
-        for profile in (
-            NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
-            SPECIES_NEUTRAL_IDS_NO_ORGANISM,
-        ):
-            control_files[profile] = {}
-            for split in PARTITIONS:
-                path = data / "prompt_controls" / profile / PRIMARY_CSV_NAMES[split]
+            control_files = {}
+            for profile in (
+                NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
+                SPECIES_NEUTRAL_IDS_NO_ORGANISM,
+            ):
+                path = data / "prompt_controls" / profile / CSV_NAMES[split]
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(f"{profile},{split}\n", encoding="utf-8")
-                path_sha = self._digest(path)
-                relative = path.relative_to(data).as_posix()
-                control_files[profile][split] = {
-                    "path": relative,
-                    "sha256": path_sha,
+                control_files[profile] = {
+                    "path": path.relative_to(data).as_posix(),
+                    "sha256": self._digest(path),
+                    "bytes": path.stat().st_size,
                 }
-                control_reports[f"{profile}:{split}"] = {
-                    "path": str(path),
-                    "sha256": path_sha,
-                    "rows": 1,
-                    "errors": [],
-                }
-        for split in PARTITIONS:
-            pair_checks[
-                f"{split}:{PRIMARY_PROMPT_PROFILE}_vs_"
-                f"{NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS}"
-            ] = {
-                "passed": True,
-                "base_sample_policy": "exact_primary_set",
+            audit_outputs[split] = {
+                "rows": 1,
+                "records": 1,
+                "graphs": 1,
+                "views": 1,
+                "sources": 1,
+                "organisms": 1,
+                "families": 1,
+                "input_tokens": 10,
+                "token_length": {"min": 10, "mean": 10.0, "max": 10},
+                "horizons": {"short_target": 1},
+                "layer_length_distribution": {"2": 1},
+                "substeps": {
+                    "semantic_duplicates_within_layer": 0,
+                    "duplicate_participant_canonical_ids": 0,
+                },
+                "prompt_controls": {
+                    "p1_rows": 1,
+                    "p2_rows": 1,
+                    "p2_ineligible_records": 0,
+                    "files": control_files,
+                },
+                "csv_sha256": csv_sha,
+                "records_sha256": record_sha,
+                "csv_bytes": csv_paths[split].stat().st_size,
+                "records_bytes": record_paths[split].stat().st_size,
             }
-            pair_checks[
-                f"{split}:{PRIMARY_PROMPT_PROFILE}_vs_"
-                f"{SPECIES_NEUTRAL_IDS_NO_ORGANISM}"
-            ] = {
-                "passed": True,
-                "base_sample_policy": "strict_natural_neutral_subset",
+            outputs[split] = {
+                **audit_outputs[split],
+                "csv_file": CSV_NAMES[split],
+                "records_file": RECORD_NAMES[split],
             }
         manifest_value = {
             "schema_version": RELEASE_SCHEMA_VERSION,
             "max_length": 8192,
             "primary_prompt_profile": PRIMARY_PROMPT_PROFILE,
             "processed_graph_root": str(graph_root),
+            "canonical_index": {
+                "path": str(data / "canonical_index_v4.sqlite3"),
+                "sha256": "canonical-sha",
+                "processed_graph_root": str(graph_root),
+                "summary": {"graphs": 1, "records": len(ALL_SPLITS)},
+            },
             "source_graph_hashes": {
                 "path": source_hashes.name,
-                "records": 1,
+                "sources": 1,
                 "sha256": source_sha,
+                "bytes": source_hashes.stat().st_size,
             },
-            "paired_prompt_profiles": {
-                "status": "published",
-                "published": True,
-                "files": control_files,
-            },
-            "prompt_controls": control_files,
-            "splits": split_manifest,
+            "outputs": outputs,
         }
-        manifest = data / "dataset_manifest.json"
+        manifest = data / MANIFEST_NAME
         manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
-        overlaps = {}
-        for (left, right), contract in OVERLAP_CONTRACT.items():
-            overlaps[f"{left}_vs_{right}"] = {
-                "identity_contract": {
-                    field: {"policy": "forbidden", "passed": True}
-                    for field in (
-                        "source_json",
-                        "graph_id",
-                        "view_id",
-                        "record_id",
-                        "base_sample_id",
-                    )
-                },
-                "biological_contract": {
-                    field: {"policy": policy, "passed": True}
-                    for field, policy in contract.items()
-                },
+        pinned_paths = [
+            manifest,
+            source_hashes,
+            split_assignments,
+            *csv_paths.values(),
+            *record_paths.values(),
+            *sorted(data.glob("prompt_controls/*/*.csv")),
+        ]
+        pinned_files = {
+            path.relative_to(data).as_posix(): {
+                "sha256": self._digest(path),
+                "bytes": path.stat().st_size,
             }
+            for path in pinned_paths
+        }
+        overlaps = {
+            f"{left}__{right}": {
+                key: 0
+                for key in (
+                    "samples",
+                    "records",
+                    "graphs",
+                    "views",
+                    "sources",
+                    "families",
+                    "organisms",
+                )
+            }
+            for index, left in enumerate(ALL_SPLITS)
+            for right in ALL_SPLITS[index + 1 :]
+        }
         audit = {
             "schema_version": AUDIT_SCHEMA_VERSION,
             "release_schema_version": RELEASE_SCHEMA_VERSION,
             "status": "passed",
-            "strict_failures": [],
-            "max_length": 8192,
-            "manifest_sha256": self._digest(manifest),
-            "source_graph_hashes": {
-                "status": "passed",
-                "errors": [],
-                "records": 1,
-                "sha256": source_sha,
+            "failures": [],
+            "canonical_index": {
+                "complete": True,
+                "processed_graph_root": str(graph_root),
+                "inventory": {"graph_files": 1},
+                "summary": {"graphs": 1, "records": len(ALL_SPLITS)},
+                "database_sha256": "canonical-sha",
             },
-            "paired_prompt_profiles": {
-                "status": "passed",
-                "manifest_published": True,
-                "canonical_files_match_prompt_controls": True,
-                "declared_file_reports": control_reports,
-                "pair_checks": pair_checks,
+            "canonical_assignment_coverage": {
+                "records": len(ALL_SPLITS),
+                "assigned_records": len(ALL_SPLITS),
+                "unassigned_records": 0,
             },
-            "required_summary": {"strict_overlap": overlaps},
-            "splits": split_audit,
+            "source_holdout": {
+                "policy": "dataset_internal_coverage_quantile_stratified_source_holdout",
+                "claims_phylogenetic_balance": False,
+            },
+            "materialized_splits": audit_outputs,
+            "strict_overlap": overlaps,
+            "duplicate_ids": {
+                "canonical_record_ids": 0,
+                "source_graph_paths": 0,
+                "source_graph_ids": 0,
+                "materialized_sample_ids_within_splits": 0,
+                "materialized_sample_ids_across_splits": 0,
+                "materialized_record_ids_across_splits": 0,
+            },
+            "horizon_balance": {
+                split: {"actual_matches_theoretical_optimum": True}
+                for split in ALL_SPLITS
+            },
+            "token_and_truncation": {"max_length": 8192},
+            "graph_artifact_coverage": {
+                "selected_source_hashes": {
+                    "sources": 1,
+                    "sha256": source_sha,
+                    "bytes": source_hashes.stat().st_size,
+                },
+                "processed_text_counterparts": {
+                    "status": "complete",
+                    "checked_sources": 1,
+                    "indexed_sources": 1,
+                    "missing_counterparts": 0,
+                    "visible_legacy_text_events": 1,
+                    "exact_legacy_text_matches": 1,
+                    "unmatched_legacy_text_events": 0,
+                },
+            },
+            "hashes": {"files": pinned_files},
         }
-        audit_path = data / "data_audit.json"
+        audit_path = data / AUDIT_NAME
         audit_path.write_text(json.dumps(audit), encoding="utf-8")
         audit_path.chmod(0o444)
         return csv_paths, record_paths, audit_path
@@ -212,7 +252,7 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             validate_inputs(root)
             record_paths["train"].chmod(0o644)
             record_paths["train"].write_text("changed\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "train record JSONL changed"):
+            with self.assertRaisesRegex(ValueError, "release artifact changed after audit"):
                 validate_inputs(root)
 
     def test_runtime_preflight_rejects_audited_rows_over_8192_tokens(self) -> None:
@@ -221,9 +261,7 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             _csv_paths, _record_paths, audit_path = self._release_fixture(root)
             audit_path.chmod(0o644)
             audit = json.loads(audit_path.read_text(encoding="utf-8"))
-            audit["splits"]["train"]["truncation_estimate"][
-                "accepted_rows_over_budget"
-            ] = 1
+            audit["materialized_splits"]["train"]["token_length"]["max"] = 8193
             audit_path.write_text(json.dumps(audit), encoding="utf-8")
             audit_path.chmod(0o444)
             with self.assertRaisesRegex(ValueError, "strict 8192-token"):
@@ -235,9 +273,9 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             _csv_paths, _record_paths, _audit_path = self._release_fixture(root)
             missing = (
                 root
-                / "data/pathway_v3_cap256/prompt_controls"
+                / "data/pathway_v4_full/prompt_controls"
                 / NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS
-                / PRIMARY_CSV_NAMES["test_family_only"]
+                / CSV_NAMES["test_strict"]
             )
             missing.unlink()
             with self.assertRaises(FileNotFoundError):
@@ -247,7 +285,7 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self._release_fixture(root)
-            (root / "KEGG_all_new/processed_graph/a.json").write_text(
+            (root / "KEGG_all_new/processed_graph/org/a.json").write_text(
                 '{"graph":"changed"}\n', encoding="utf-8"
             )
             with self.assertRaisesRegex(ValueError, "live source graph content hashes"):
@@ -316,17 +354,17 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
             by_key["11:exp000:infer:shard2"].skip_if_outputs,
             by_key["11:exp000:infer"].outputs,
         )
-        family_shard = by_key["11:exp000:infer:test_family_only:shard2"]
+        family_shard = by_key["11:exp000:infer:test_strict:shard2"]
         self.assertEqual(
             family_shard.command[family_shard.command.index("--input") + 1],
-            "/assets/data/pathway_v3_cap256/test_family_only_pathway_continuation_v3.csv",
+            "/assets/data/pathway_v4_full/test_strict_pathway_continuation_v4.csv",
         )
         self.assertIn(
             Path(
                 "/assets/runs/seeds/11/experiments/exp000_sft_only_direct/"
-                "diagnostics/test_family_only/direct.csv"
+                "diagnostics/test_strict/direct.csv"
             ),
-            by_key["11:exp000:infer:test_family_only"].outputs,
+            by_key["11:exp000:infer:test_strict"].outputs,
         )
         for key in ("11:sft", "11:ae"):
             command = by_key[key].command
@@ -366,16 +404,16 @@ class CfffMatrixSchedulerTests(unittest.TestCase):
                 "11:exp000:infer:shard1",
                 "11:exp000:infer:shard2",
                 "11:exp000:infer:shard3",
-                "11:exp000:infer:test_family_only",
-                "11:exp000:infer:test_family_only:shard0",
-                "11:exp000:infer:test_family_only:shard1",
-                "11:exp000:infer:test_family_only:shard2",
-                "11:exp000:infer:test_family_only:shard3",
-                "11:exp000:infer:test_organism_only",
-                "11:exp000:infer:test_organism_only:shard0",
-                "11:exp000:infer:test_organism_only:shard1",
-                "11:exp000:infer:test_organism_only:shard2",
-                "11:exp000:infer:test_organism_only:shard3",
+                "11:exp000:infer:test_organism",
+                "11:exp000:infer:test_organism:shard0",
+                "11:exp000:infer:test_organism:shard1",
+                "11:exp000:infer:test_organism:shard2",
+                "11:exp000:infer:test_organism:shard3",
+                "11:exp000:infer:test_strict",
+                "11:exp000:infer:test_strict:shard0",
+                "11:exp000:infer:test_strict:shard1",
+                "11:exp000:infer:test_strict:shard2",
+                "11:exp000:infer:test_strict:shard3",
             },
         )
         for job in selected:

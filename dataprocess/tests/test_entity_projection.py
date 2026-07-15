@@ -12,9 +12,18 @@ from dataprocess.prompt_profiles import (
 
 
 def _event(source: list[dict[str, str]], target: list[dict[str, str]]) -> dict:
+    source = [{**entity, "aliases": entity.get("aliases", [])} for entity in source]
+    target = [{**entity, "aliases": entity.get("aliases", [])} for entity in target]
     return {
+        "event_type": "relation",
         "source": source,
-        "relation": "activation",
+        "action": {
+            "kind": "relation",
+            "relation_class": "PPrel",
+            "subtypes": ["activation"],
+            "reversibility": None,
+        },
+        "mediators": [],
         "target": target,
         "text": "A activates B.",
     }
@@ -47,7 +56,7 @@ class EntityProjectionTests(unittest.TestCase):
         self.assertIsNot(explicit.projected["source"], native["source"])
         self.assertEqual(native, original)
 
-    def test_neutral_kegg_entities_pass_without_conversion(self) -> None:
+    def test_neutral_kegg_entities_are_identity_only_neutralized(self) -> None:
         neutral = _event(
             [
                 {"canonical_id": "ko:K00844", "name": "hexokinase"},
@@ -66,7 +75,13 @@ class EntityProjectionTests(unittest.TestCase):
             profile=SPECIES_NEUTRAL_IDS_NO_ORGANISM,
         )
         self.assertTrue(result.eligible)
-        self.assertEqual(result.projected, neutral)
+        self.assertNotEqual(result.projected, neutral)
+        projected_entities = result.projected["source"] + result.projected["target"]
+        self.assertTrue(
+            all(entity["name"] == entity["canonical_id"] for entity in projected_entities)
+        )
+        self.assertNotIn("hexokinase", result.projected["text"])
+        self.assertIn("ko:K00844", result.projected["text"])
         self.assertEqual(dict(result.rejection_reason_counts), {})
 
     def test_organism_and_source_native_namespaces_are_rejected(self) -> None:
@@ -104,12 +119,12 @@ class EntityProjectionTests(unittest.TestCase):
         self.assertFalse(result.eligible)
         self.assertEqual(result.rejection_reason_counts["missing_namespace"], 1)
 
-    def test_names_cannot_leak_organism_or_native_id_tokens(self) -> None:
-        for name, reason in (
-            ("AKT1 (hsa:207)", "name_contains_organism_code"),
-            ("hsa AKT1", "name_contains_organism_code"),
-            ("AKT1 gene:207", "name_contains_source_native_id"),
-            ("AKT1 mmu:11651", "name_contains_source_native_id"),
+    def test_source_native_names_are_removed_after_neutral_id_eligibility(self) -> None:
+        for name in (
+            "AKT1 (hsa:207)",
+            "hsa AKT1",
+            "AKT1 gene:207",
+            "AKT1 mmu:11651",
         ):
             with self.subTest(name=name):
                 result = project_event(
@@ -120,8 +135,9 @@ class EntityProjectionTests(unittest.TestCase):
                     organism="hsa",
                     profile=SPECIES_NEUTRAL_IDS_NO_ORGANISM,
                 )
-                self.assertFalse(result.eligible)
-                self.assertGreaterEqual(result.rejection_reason_counts[reason], 1)
+                self.assertTrue(result.eligible)
+                self.assertNotIn(name, str(result.projected))
+                self.assertEqual(result.projected["source"][0]["name"], "ko:K04456")
 
     def test_pathway_internal_and_unknown_namespaces_are_rejected(self) -> None:
         cases = (

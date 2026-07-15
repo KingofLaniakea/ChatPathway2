@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
 import os
 from pathlib import Path
@@ -115,9 +116,76 @@ def verify_source_graph_hashes(
     }
 
 
+def verify_source_graph_hashes_tsv(
+    graph_root: Path,
+    inventory_path: Path,
+    *,
+    expected_sources: Iterable[str] | None = None,
+) -> dict[str, object]:
+    """Verify the richer v4 TSV inventory against live source artifacts."""
+
+    from dataprocess.structured_schema import graph_id_for_source
+
+    expected_header = [
+        "source_graph_json",
+        "graph_id",
+        "sha256",
+        "bytes",
+        "status",
+    ]
+    observed: set[str] = set()
+    errors: list[str] = []
+    with inventory_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if reader.fieldnames != expected_header:
+            errors.append(
+                f"header must be {expected_header!r}; observed={reader.fieldnames!r}"
+            )
+        else:
+            for line_number, value in enumerate(reader, 2):
+                try:
+                    source = str(value["source_graph_json"])
+                    normalized = Path(source).as_posix()
+                    if source != normalized or normalized.startswith("/") or ".." in Path(normalized).parts:
+                        raise ValueError("source graph path must be normalized and contained")
+                    if source in observed:
+                        raise ValueError(f"duplicate source_graph_json {source!r}")
+                    if value["status"] != "ok":
+                        raise ValueError(f"source status must be 'ok', got {value['status']!r}")
+                    artifact = graph_root / source
+                    raw = artifact.read_bytes()
+                    actual_sha = hashlib.sha256(raw).hexdigest()
+                    if int(value["bytes"]) != len(raw):
+                        raise ValueError(f"source byte-size mismatch for {source!r}")
+                    if value["sha256"] != actual_sha:
+                        raise ValueError(f"source hash mismatch for {source!r}")
+                    if value["graph_id"] != graph_id_for_source(source, raw):
+                        raise ValueError(f"source graph identity mismatch for {source!r}")
+                    observed.add(source)
+                except (KeyError, OSError, TypeError, ValueError) as exc:
+                    errors.append(f"line {line_number}: {exc}")
+    expected = (
+        {Path(value).as_posix() for value in expected_sources}
+        if expected_sources is not None
+        else None
+    )
+    if expected is not None and observed != expected:
+        errors.append(
+            "source inventory coverage mismatch: "
+            f"missing={len(expected - observed)} extra={len(observed - expected)}"
+        )
+    return {
+        "path": str(inventory_path),
+        "records": len(observed),
+        "sha256": file_sha256(inventory_path),
+        "errors": errors,
+    }
+
+
 __all__ = [
     "file_sha256",
     "source_hash_record",
     "verify_source_graph_hashes",
+    "verify_source_graph_hashes_tsv",
     "write_source_graph_hashes",
 ]

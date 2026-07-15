@@ -331,7 +331,7 @@ def run_inference(cfg: InferenceConfig) -> None:
                 expected_first_layer = int(source_row.get("prefix_step_count", ""))
             except (TypeError, ValueError) as exc:
                 raise ValueError(
-                    "Input CSV must contain an integer prefix_step_count for strict v3 inference"
+                    "Input CSV must contain an integer prefix_step_count for strict v4 inference"
                 ) from exc
             attempt_history = [initial]
             current = initial

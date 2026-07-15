@@ -316,7 +316,7 @@ def main() -> None:
 
     prepare_structured = sub.add_parser(
         "prepare-structured-data",
-        help="Build and strictly audit the five-partition pathway-continuation v3.1 release.",
+        help="Historical compatibility entry: build the capped five-partition v3.1 release.",
     )
     prepare_structured.add_argument("--processed-graph-root")
     prepare_structured.add_argument(
@@ -355,6 +355,29 @@ def main() -> None:
     prepare_structured.add_argument("--seed", type=int, default=20260711)
     prepare_structured.add_argument("--progress-every", type=int, default=1000)
     prepare_structured.add_argument("--overwrite", action="store_true")
+
+    prepare_v4 = sub.add_parser(
+        "prepare-structured-data-v4",
+        help="Build/resume the full canonical v4 index, then materialize the audited v4 release.",
+    )
+    prepare_v4.add_argument("--processed-graph-root")
+    prepare_v4.add_argument("--processed-root")
+    prepare_v4.add_argument("--index-dir")
+    prepare_v4.add_argument("--output-dir")
+    prepare_v4.add_argument("--tokenizer")
+    prepare_v4.add_argument("--index-workers", type=int, default=64)
+    prepare_v4.add_argument("--index-batch-size", type=int, default=8)
+    prepare_v4.add_argument("--token-workers", type=int, default=32)
+    prepare_v4.add_argument("--token-worker-batch-size", type=int, default=8)
+    prepare_v4.add_argument("--source-holdout-fraction", type=float, default=0.10)
+    prepare_v4.add_argument("--protected-sources", default="hsa,ko,ec")
+    prepare_v4.add_argument("--train-token-budget", type=int, default=515000000)
+    prepare_v4.add_argument("--maximum-evaluation-records", type=int, default=20000)
+    prepare_v4.add_argument("--minimum-train-records", type=int, default=12000)
+    prepare_v4.add_argument("--max-length", type=int, choices=(8192,), default=8192)
+    prepare_v4.add_argument("--seed", type=int, default=20260715)
+    prepare_v4.add_argument("--progress-every", type=int, default=1000)
+    prepare_v4.add_argument("--overwrite-release", action="store_true")
 
     download_model = sub.add_parser("download-model", help="Download and verify the pinned Qwen3-8B snapshot.")
     download_model.add_argument("--revision", default="b968826")
@@ -634,6 +657,71 @@ def main() -> None:
         if args.overwrite:
             command.append("--overwrite")
         raise SystemExit(subprocess.run(command, check=False).returncode)
+
+    if args.command == "prepare-structured-data-v4":
+        graph_root = args.processed_graph_root or asset_path("KEGG_all_new/processed_graph")
+        processed_root = args.processed_root or asset_path("KEGG_all_new/processed")
+        index_dir = args.index_dir or asset_path("data/pathway_v4_canonical_index")
+        release_dir = args.output_dir or asset_path("data/pathway_v4_full")
+        tokenizer = args.tokenizer or asset_path("models/qwen3_8B")
+        index_command = [
+            sys.executable,
+            "-m",
+            "dataprocess.index_structured_graphs_v4",
+            "--processed-graph-root",
+            graph_root,
+            "--processed-root",
+            processed_root,
+            "--output-dir",
+            index_dir,
+            "--workers",
+            str(args.index_workers),
+            "--batch-size",
+            str(args.index_batch_size),
+            "--seed",
+            str(args.seed),
+            "--progress-every",
+            str(args.progress_every),
+        ]
+        result = subprocess.run(index_command, check=False)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+        materialize_command = [
+            sys.executable,
+            "-m",
+            "dataprocess.materialize_dataset_v4",
+            "--index-dir",
+            index_dir,
+            "--output-dir",
+            release_dir,
+            "--tokenizer",
+            tokenizer,
+            "--processed-root",
+            processed_root,
+            "--source-holdout-fraction",
+            str(args.source_holdout_fraction),
+            "--protected-sources",
+            args.protected_sources,
+            "--train-token-budget",
+            str(args.train_token_budget),
+            "--maximum-evaluation-records",
+            str(args.maximum_evaluation_records),
+            "--minimum-train-records",
+            str(args.minimum_train_records),
+            "--max-length",
+            str(args.max_length),
+            "--token-workers",
+            str(args.token_workers),
+            "--token-worker-batch-size",
+            str(args.token_worker_batch_size),
+            "--seed",
+            str(args.seed),
+            "--progress-every",
+            str(args.progress_every),
+        ]
+        if args.overwrite_release:
+            materialize_command.append("--overwrite")
+        raise SystemExit(subprocess.run(materialize_command, check=False).returncode)
 
     if args.command == "download-model":
         command = [

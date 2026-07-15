@@ -380,8 +380,8 @@ def initialize_database(path: Path) -> sqlite3.Connection:
     )
     connection.execute("CREATE INDEX candidates_split_family ON candidates(split, family)")
     connection.execute(
-        "CREATE INDEX candidates_split_family_graph "
-        "ON candidates(split, family, graph_id)"
+        "CREATE INDEX candidates_split_family_rank "
+        "ON candidates(split, family, rank)"
     )
     return connection
 

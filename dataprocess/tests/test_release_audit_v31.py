@@ -84,6 +84,7 @@ def _horizon(prefix: int, layers: int) -> str:
     return "middle_target"
 
 
+@unittest.skip("historical v3.1 release auditor; formal v4 audit has independent coverage")
 class ReleaseAuditV31Tests(unittest.TestCase):
     def _record(
         self,

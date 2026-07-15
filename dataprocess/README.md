@@ -1,66 +1,51 @@
-# Pathway-continuation v3 dataset
+# Pathway-continuation v4 数据管线
 
-The active builder is `build_structured_dataset.py`. It reads canonical
-`processed_graph/<organism>/<pathway>.json` directly; it does not recover
-events by splitting the concatenated paragraphs under `processed/`.
+正式构建分成两个阶段：
 
-## Biological record
+1. `index_structured_graphs_v4.py` 并行扫描全部 `processed_graph`，生成可恢复的 canonical SQLite index；
+2. `materialize_dataset_v4.py` 只用 index 内部统计完成划分、token 筛选和正式发布。
 
-Relations and reactions are read only from `processed_graph.relations` and
-`processed_graph.reactions`; `processed/` is optional path/text reconciliation,
-never event truth. Direction-bearing relation subtypes and reaction direction
-form the topology backbone. Binding, dissociation, state-change, modification,
-and compound-mediator evidence is retained as context without inventing an
-ordering edge. Missing/unknown relations are excluded explicitly. Any invalid
-endpoint or inconsistent subtype representation rejects the entire graph
-rather than silently deleting one edge and recomputing topology.
+`processed_graph/<source>/<pathway>.json` 是 relation、reaction、action、实体和图层结构的事实源。`processed/<source>/<pathway>.json` 只是历史文本对应物；索引要求每个 producer event 的 `legacy_text` 都能在对应旧段落中逐字找到，但不从拼接 paragraph 反推 event。
 
-The builder condenses backbone cycles with Tarjan SCC and creates one
-sink-rooted view per sink SCC. Layers use longest distance in the condensation
-DAG and provide ordinal upstream-to-downstream position, not measured time.
-Context can attach to a backbone view but cannot expand it. No event is
-deduplicated by text.
+## Canonical biological record
 
-Identity is explicit:
+- 非 group entry 是一个参与者；多个 resolved ID 分为一个 `canonical_id` 与 aliases，不拆成多个虚假参与者。
+- group entry 递归展开成员。
+- relation 保存 relation class 和全部 subtype；reaction 保存 substrate/product 与可逆性。
+- 只有有明确方向证据的关系和 reaction 方向参与 SCC/topology。无方向信息保留为 context，不制造时间边。
+- 任意坏端点、未解析实体或互相矛盾的结构字段会隔离整张 graph。
+- 先完成 SCC 和 layer 归属，再合并同层语义完全相同的 event；所有 producer event ID 和端点 provenance 仍保留。
+- `legacy_text` 复现固定的历史 Step12 模板，`text` 使用同一结构事实和已审计模板修正已知方向或语法问题。不会调用 LLM 生成 gold text。
 
-- `graph_id`: hash of the relative source path together with the canonical graph JSON content hash;
-- `view_id`: graph plus sorted sink-node signature;
-- `record_id`: graph plus view;
-- `base_sample_id`: record plus observed-prefix length;
-- `sample_id`: base sample plus prompt profile.
+身份顺序为 `graph_id -> view_id -> record_id -> base_sample_id -> profile sample_id`。JSONL 保存完整 record 与 provenance；CSV 一行是一个被选中的 prefix→continuation 问题。
 
-The record JSONL keeps organism, pathway, graph/view/event IDs and source
-paths. Those are provenance metadata, not fields the model must generate.
+## Prompt 与闭合目标
 
-## Model-visible contract
+主条件 P0 显示已知的 KEGG source/organism code 和 observed upstream layers，并直接展示目标 JSON key 结构。它不显示 pathway 名称、类别、ID、title、block 或 phenotype。另发布：
 
-The question shows a complete parseable example of the required JSON shape,
-the observed structured layers, and—under the primary profile—the known KEGG
-organism code. It contains no pathway name, class, ID, block, title, or
-phenotype field.
+- P1：去掉显式 source code，但保留 native ID，因此不是严格无物种条件；
+- P2：只保留天然物种中立 ID 全覆盖的样本，不删除物种前缀伪造映射；模型可见 `name` 与 `text` 也用中立 ID 确定性重写，避免名称侧漏。
 
-Three prompt conditions are released:
-
-- `explicit_organism_source_native_ids` (P0): primary training/evaluation;
-- `no_explicit_organism_source_native_ids` (P1): exact paired control, but
-  native IDs can still reveal species;
-- `species_neutral_ids_no_organism` (P2): exact natural-neutral subset using
-  already-neutral KO/compound/glycan/reaction/EC IDs. Prefix stripping is never
-  treated as a mapping.
-
-The closed target is:
+目标是完整 `pathway_continuation_v4`：
 
 ```json
 {
-  "schema_version": "pathway_continuation_v3",
+  "schema_version": "pathway_continuation_v4",
   "remaining_layers": [
     {
       "layer_index": 2,
       "events": [
         {
-          "source": [{"canonical_id": "ko:K00001", "name": "A"}],
-          "relation": "activation",
-          "target": [{"canonical_id": "ko:K00002", "name": "B"}],
+          "event_type": "relation",
+          "source": [{"canonical_id": "ko:K00001", "aliases": [], "name": "A"}],
+          "action": {
+            "kind": "relation",
+            "relation_class": "PPrel",
+            "subtypes": ["activation"],
+            "reversibility": null
+          },
+          "mediators": [],
+          "target": [{"canonical_id": "ko:K00002", "aliases": [], "name": "B"}],
           "text": "A activates B."
         }
       ]
@@ -69,87 +54,32 @@ The closed target is:
 }
 ```
 
-Phenotype is currently disabled. `phenotype_status=not_annotated` exists only
-in metadata and does not mean a negative phenotype.
+完整 chat prompt、answer 和结束标记超过 8192 token 的候选在写盘前排除；JSON 永不截断。推理最多三次，第三次仍不闭合或 schema 不合法就记录错误并失败。
 
-## Split and size policy
+## 数据内生划分
 
-- Five partitions are fixed: train, validation, strict test, family-only test,
-  and organism-only test. Strict test holds out both organism and five-digit
-  family; the two diagnostic tests isolate those factors.
-- Source graph, graph, view, record, and base-sample identities are disjoint
-  across every partition.
-- Selection is deterministic and organism-first. At least one train-assigned
-  graph per available training organism bypasses fractional sampling, then
-  records are added by organism round-robin. Each family remains capped at 256.
-- At most three evenly spaced prefix rows are stored per train record; each
-  training epoch chooses one deterministically.
-- The default release targets 12,000–18,000 accepted train records and at most
-  about 36 million input tokens per epoch. The measured four-A100 baseline and
-  a 12-epoch ceiling target about 60 hours and reject an estimate above 72
-  hours; the first full v3 epoch replaces this estimate with observed speed.
+划分不调用外部 taxonomy。它只使用 canonical index 中每个 source code 的 record、graph、family、layer 和 event 覆盖：
 
-## Token and JSON policy
+1. 按覆盖规模分成最多十个分位层，每层固定 seed 留出约 10% source；`hsa`、`ko`、`ec` 固定保留；
+2. 在 seen sources 上把完整五位 KEGG family 作为不可拆单位，优化 train/validation/test 的 record 比例到 70/20/10；
+3. 发布 `train`、`validation`、`test`、`test_organism`（未见 source + train family）和 `test_strict`（未见 source + 任意非 train family，含只在留出来源出现的 family）。
 
-The real Qwen tokenizer measures the complete chat prompt plus the complete
-assistant answer and `<|im_end|>`. A row above 8192 tokens is excluded before
-writing the release. Training uses the same check and raises if an oversized
-row slips through; assistant JSON is never truncated.
+这能严格测试“数据覆盖分层的未见 source code”，但不声称系统发育平衡，也不声称不同 family 没有相似子图。后者需要另建 graph-similarity cluster 对照。
 
-Inference performs at most three attempts. Invalid or unclosed output is
-regenerated with an explicit repair turn and larger token budget. The third
-failure is written to progress JSONL and raises an error.
+canonical index 不抽样、不做 family cap。正式 train 发布按固定候选顺序尽量装满 515,000,000 个完整 token，默认 validation/test 各最多 20,000 record。每个 record 只发布一个由全局匹配器平衡的 long/middle/short horizon；默认第一轮 SFT 为 1 epoch。
 
-## Parallel archive transfer to CFFF
+## CFFF 构建
 
-Use the shard-level uploader for the 16 independent `processed_graph`
-archives:
+首选入口是带锁和断点策略的脚本：
 
 ```bash
-bash dataprocess/upload_cfff_archives_parallel.sh \
-  /private/tmp/chatpathway_drive_to_cfff_stage \
-  lihaorui@10.193.2.99 \
-  /cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui/KEGG_all_new_processed_graph_archives_20260713 \
-  4 30456 /private/tmp/chatpathway_cfff_20260713.sock
+bash dataprocess/run_cfff_dataset_v4.sh
 ```
 
-The script transfers only artifacts listed in `SHA256SUMS`. It skips a remote
-artifact only after hashing it, resumes `.incoming.<name>` with SFTP `reput`,
-and atomically exposes the final name only after remote SHA-256 verification.
-Passwords, tokens, private keys, and `rclone.conf` must never enter the script
-or its logs.
+默认使用 64 个 graph parser worker 和 32 个 tokenizer worker。canonical index 可以从已完成的 source 继续；若正式物化被打断，脚本保留 index，只从头重建 release，并在开始时删除旧 audit，防止调度器误用半成品。
 
-## Build on CFFF
+输出目录 `data/pathway_v4_full/` 包含五组 P0 CSV/record JSONL、P1/P2 controls、`source_graph_hashes.tsv`、`split_assignments.json`、`dataset_manifest.json` 和只读 0444 `data_audit.json`。audit 固定全量 inventory、每个 split 的计数与 overlap、duplicate identities、parser/substep/layer/token 统计、processed counterpart 的逐事件文本精确匹配，以及所有正式文件/source graph hash。训练调度器会再次验证这些契约。
 
-After `processed_graph` and the pinned Qwen tokenizer are present:
+## 历史入口
 
-```bash
-export CHATPATHWAY_PROFILE=cfff
-python -m experiments.run_experiment prepare-structured-data \
-  --max-records-per-family 256 \
-  --minimum-train-records 12000 \
-  --seed 20260711 \
-  --overwrite
-```
-
-The release is written to `data/pathway_v3_cap256/`:
-
-- train/validation/test CSV compatibility views;
-- five primary P0 CSVs and five one-record-per-line JSONLs;
-- five exact P1 control CSVs and five strict-natural P2 subset CSVs;
-- `source_graph_hashes.jsonl` covering every referenced source artifact;
-- `dataset_manifest.json`;
-- generated read-only `data_audit.json`.
-
-`data_audit.json` contains row, record, source, family, and per-organism counts;
-the full five-way overlap contract; duplicate ID checks; phenotype/parser
-status; event, layer, token, truncation, and graph-artifact coverage; all file
-and source hashes; exact P0/P1 pairing; and P2 natural-neutral eligibility. The
-CFFF scheduler recomputes these checks before allocating GPUs.
-
-## Historical builders
-
-`build_pathway_csv.py`, `prepare_experiment_data.py`, and
-`select_training_coverage.py` remain for reproducing the v2 paragraph-based
-corpus. Their `sentence_parser_v1` boundaries and phenotype ambiguity policy
-must not be presented as the v3 canonical event release.
+`build_pathway_csv.py`、`prepare_experiment_data.py`、`select_training_coverage.py` 和 `build_structured_dataset.py` 只用于复现 v2/v3。它们不是 v4 正式构建器。

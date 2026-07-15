@@ -1,41 +1,41 @@
 {
-  "version": "2026-07-15-v3.1",
-  "purpose": "Direct-inference controlled benchmark on the strictly audited structured pathway-continuation v3.1 release. All stage-2 arms share one P0 SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
+  "version": "2026-07-15-v4.0",
+  "purpose": "Direct-inference controlled benchmark on the full-index, strictly audited structured pathway-continuation v4 release. All stage-2 arms share one P0 SFT and AE and use the same optimizer schedule; only the Hamiltonian losses differ.",
   "dataset_profile": {
-    "name": "structured_pathway_continuation_v3_cap256",
-    "release_schema": "chatpathway_structured_release_v3.1",
-    "audit_schema": "chatpathway_data_audit_v3.1",
-    "source": "processed_graph nodes, relations, reactions, subtypes, and stable graph/view/record/sample identity; processed text is used only for source-path coverage reconciliation",
+    "name": "structured_pathway_continuation_v4_full",
+    "release_schema": "chatpathway_structured_release_v4.0",
+    "audit_schema": "chatpathway_data_audit_v4.0",
+    "source": "A resumable canonical index scans every processed_graph JSON exactly once. Nodes, relations, reactions, action subtypes, graph layers, aliases, producer provenance, legacy Step12 text, corrected deterministic text, and stable graph/view/record/sample identities are preserved; processed text is used only for counterpart coverage reconciliation.",
     "relation_truth": "Directed core topology uses only supported directional processed_graph relation subtypes and reaction substrate/product direction. Association, dissociation, state-change, compound-mediator, hidden-compound, and unsupported subtype facts remain context and never create an invented time edge.",
-    "selection": "seeded graph-level candidate selection, accepted-record family cap 256 after strict token filtering with backfill, organism/trajectory-length diversity, at most three prefix rows per train record, and one deterministic prefix per record per epoch",
-    "training_size_budget": "Target about 36,000,000 selected input tokens per epoch, require at least 12,000 accepted records, stop adding at 18,000 records, and fail release if the measured-throughput estimate for the planned 12 SFT epochs exceeds 72 hours.",
+    "selection": "The full canonical index is never sampled or family-capped. After complete-JSON 8192-token filtering, training candidates are processed in a deterministic coverage-first order: one record per seen source, all human records, one record per graph, then stable-rank fill. A record is accepted only while its conservative full-horizon cost fits the 515,000,000-token one-epoch envelope. One globally balanced short/middle/long prefix is then assigned per accepted record.",
+    "training_size_budget": "One formal SFT epoch targets at most 515,000,000 complete input tokens, approximately 72 hours under the conservative measured four-A100 reference including validation. The release recommends one epoch and permits at most five explicitly exploratory epochs; observed v4 packed throughput must replace the estimate after the first run.",
     "primary_prompt_profile": "explicit_organism_source_native_ids",
     "primary_training_condition": "P0 supplies the known KEGG organism code and retains source-native identifiers; all SFT, AE, HNN, and forced/damped HNN training in this matrix uses only P0 train and validation",
     "prompt_controls": {
       "no_explicit_organism_source_native_ids": "P1 removes only the explicit organism name; source-native identifiers may still reveal species, so this is not a species-free condition.",
       "species_neutral_ids_no_organism": "P2 is restricted to naturally species-neutral identifiers or a separately audited mapping; prefix stripping is forbidden and incomplete eligibility must be reported explicitly."
     },
-    "train": "data/pathway_v3_cap256/train_pathway_continuation_v3_cap256.csv",
-    "validation": "data/pathway_v3_cap256/validation_pathway_continuation_v3.csv",
+    "train": "data/pathway_v4_full/train_pathway_continuation_v4.csv",
+    "validation": "data/pathway_v4_full/validation_pathway_continuation_v4.csv",
     "diagnostic_tests": {
-      "test": "data/pathway_v3_cap256/test_pathway_continuation_v3.csv (held-out organisms and held-out pathway families)",
-      "test_family_only": "data/pathway_v3_cap256/test_family_only_pathway_continuation_v3.csv (seen organisms and the strict-test held-out families)",
-      "test_organism_only": "data/pathway_v3_cap256/test_organism_only_pathway_continuation_v3.csv (held-out organisms and training families)"
+      "test": "data/pathway_v4_full/test_pathway_continuation_v4.csv (seen organisms and the primary 10% held-out pathway families)",
+      "test_organism": "data/pathway_v4_full/test_organism_pathway_continuation_v4.csv (dataset-coverage-stratified held-out source codes and training families)",
+      "test_strict": "data/pathway_v4_full/test_strict_pathway_continuation_v4.csv (dataset-coverage-stratified held-out source codes and any non-train families)"
     },
     "record_jsonl": {
-      "train": "data/pathway_v3_cap256/train_pathway_records_v3.jsonl",
-      "validation": "data/pathway_v3_cap256/validation_pathway_records_v3.jsonl",
-      "test": "data/pathway_v3_cap256/test_pathway_records_v3.jsonl",
-      "test_family_only": "data/pathway_v3_cap256/test_family_only_pathway_records_v3.jsonl",
-      "test_organism_only": "data/pathway_v3_cap256/test_organism_only_pathway_records_v3.jsonl"
+      "train": "data/pathway_v4_full/train_pathway_records_v4.jsonl",
+      "validation": "data/pathway_v4_full/validation_pathway_records_v4.jsonl",
+      "test": "data/pathway_v4_full/test_pathway_records_v4.jsonl",
+      "test_organism": "data/pathway_v4_full/test_organism_pathway_records_v4.jsonl",
+      "test_strict": "data/pathway_v4_full/test_strict_pathway_records_v4.jsonl"
     },
-    "release_manifest": "data/pathway_v3_cap256/dataset_manifest.json",
-    "immutable_audit": "data/pathway_v3_cap256/data_audit.json",
-    "source_graph_hashes": "data/pathway_v3_cap256/source_graph_hashes.jsonl",
-    "release_gate": "The scheduler requires all five P0 CSV/record JSONL pairs, schema v3.1, exact P0 prompt metadata, complete SHA-256 agreement, a passing fixed overlap contract, zero accepted rows above 8192 tokens, verified source graphs, and data_audit.json mode 0444.",
-    "semantic_unit": "graph layers are ordinal causal depth rather than measured biological time; within-layer events retain parallel-event provenance and are not serialized into invented biological time",
-    "epoch_prefix_sampling": "record-centric and seed/epoch deterministic; SFT emphasizes short continuation twice per four-record-epochs plus one middle and one long view, while HNN/FDHNN emphasizes long continuation twice plus one middle and one short view; validation prefixes remain fixed",
-    "source_schema_note": "v3.1 reconstructs sink-SCC views from strict processed_graph topology and carries context events without letting them expand the sink view. It does not recover event boundaries from concatenated paragraphs and excludes phenotype from the core target."
+    "release_manifest": "data/pathway_v4_full/dataset_manifest.json",
+    "immutable_audit": "data/pathway_v4_full/data_audit.json",
+    "source_graph_hashes": "data/pathway_v4_full/source_graph_hashes.tsv",
+    "release_gate": "The scheduler requires all five P0 CSV/record JSONL pairs, schema v4.0, exact file and source hashes, a complete full-corpus canonical index, zero strict identity/family leakage in the declared comparisons, globally optimal horizon balance, zero accepted rows above 8192 tokens, and read-only mode 0444 data_audit.json.",
+    "semantic_unit": "Each canonical event is one relation or reaction with participants, aliases, structured action, mediators, text, producer IDs, and graph-layer position. Layers are ordinal causal depth rather than measured time; same-layer events are not assigned a fictitious biological order.",
+    "epoch_prefix_sampling": "The formal v4 CSV contains one globally balanced, seed-fixed short/middle/long prefix per unique selected record. The full canonical index retains every eligible prefix choice so later registered rematerializations can test alternative horizon schedules without reparsing graphs.",
+    "source_schema_note": "v4 reconstructs sink-SCC views from strict processed_graph topology, merges only semantic duplicates after layer assignment while retaining every producer event ID, treats additional IDs on a non-group KGML entry as aliases, and excludes phenotype from the core target."
   },
   "replicate_seeds": [20260711, 20260712, 20260713],
   "sequence_budget": {
@@ -47,7 +47,7 @@
     "train_batch_size_per_process": 1,
     "inference_batch_size_per_process": 1,
     "inference_batch_policy": "Pinned because batch_size can change greedy floating-point trajectories; four-GPU speedup uses disjoint data shards instead.",
-    "target_policy": "Every assistant answer is a complete closed v3 JSON object. Rows over 8192 total tokens are excluded before training and counted in data_audit.json."
+    "target_policy": "Every assistant answer is one complete closed pathway_continuation_v4 JSON object with rich action fields. Rows over 8192 total tokens are excluded before materialization and counted in data_audit.json; JSON is never truncated."
   },
   "validation_policy": {
     "group_column": "pathway_family_id",

@@ -20,9 +20,16 @@ def observed_payload(canonical_id: str) -> dict[str, object]:
                 "layer_index": 0,
                 "events": [
                     {
-                        "source": [{"canonical_id": canonical_id, "name": "A"}],
-                        "relation": "activation",
-                        "target": [{"canonical_id": "ko:K00002", "name": "B"}],
+                        "event_type": "relation",
+                        "source": [{"canonical_id": canonical_id, "aliases": [], "name": "A"}],
+                        "action": {
+                            "kind": "relation",
+                            "relation_class": "PPrel",
+                            "subtypes": ["activation"],
+                            "reversibility": None,
+                        },
+                        "mediators": [],
+                        "target": [{"canonical_id": "ko:K00002", "aliases": [], "name": "B"}],
                         "text": "A activates B.",
                     }
                 ],
@@ -62,7 +69,7 @@ class PromptProfileTests(unittest.TestCase):
             {
                 "organism_conditioning": "absent_after_neutralization",
                 "entity_id_space": "species_neutral_kegg",
-                "entity_mapping_status": "complete",
+                "entity_mapping_status": "complete_identity_only_neutral_projection",
             },
         )
 
@@ -74,7 +81,7 @@ class PromptProfileTests(unittest.TestCase):
             profile=EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
         )
 
-        self.assertIn("Organism (KEGG code): hsa", question)
+        self.assertIn("Organism/source context (KEGG code): hsa", question)
         self.assertIn("first remaining layer must use layer_index 3", question)
         self.assertIn("Do not use Markdown", question)
         self.assertIn("Do not add extra keys", question)
@@ -94,14 +101,21 @@ class PromptProfileTests(unittest.TestCase):
         )[0]
         shape = json.loads(skeleton)
         self.assertEqual(set(shape), {"schema_version", "remaining_layers"})
-        self.assertEqual(shape["schema_version"], "pathway_continuation_v3")
+        self.assertEqual(shape["schema_version"], "pathway_continuation_v4")
         layer = shape["remaining_layers"][0]
         self.assertEqual(set(layer), {"layer_index", "events"})
         self.assertEqual(layer["layer_index"], 3)
         event = layer["events"][0]
-        self.assertEqual(set(event), {"source", "relation", "target", "text"})
-        self.assertEqual(set(event["source"][0]), {"canonical_id", "name"})
-        self.assertEqual(set(event["target"][0]), {"canonical_id", "name"})
+        self.assertEqual(
+            set(event),
+            {"event_type", "source", "action", "mediators", "target", "text"},
+        )
+        self.assertEqual(set(event["source"][0]), {"canonical_id", "aliases", "name"})
+        self.assertEqual(set(event["target"][0]), {"canonical_id", "aliases", "name"})
+        reaction = layer["events"][1]
+        self.assertEqual(reaction["event_type"], "reaction")
+        self.assertEqual(reaction["action"]["kind"], "conversion")
+        self.assertIsNone(reaction["action"]["relation_class"])
 
     def test_no_explicit_profile_hides_name_but_preserves_native_ids(self) -> None:
         question = render_pathway_question(
@@ -115,8 +129,13 @@ class PromptProfileTests(unittest.TestCase):
         self.assertIn('"canonical_id":"hsa:1"', question)
 
     def test_species_neutral_profile_hides_organism_and_accepts_neutral_ids(self) -> None:
+        payload = observed_payload("ko:K00001")
+        event = payload["observed_layers"][0]["events"][0]
+        event["source"][0]["name"] = "ko:K00001"
+        event["target"][0]["name"] = "ko:K00002"
+        event["text"] = "ko:K00001 activates ko:K00002."
         question = render_pathway_question(
-            observed_payload("ko:K00001"),
+            payload,
             next_layer_index=1,
             organism="hsa",
             profile=SPECIES_NEUTRAL_IDS_NO_ORGANISM,
@@ -125,6 +144,15 @@ class PromptProfileTests(unittest.TestCase):
         self.assertNotIn("Organism (KEGG code):", question)
         self.assertNotIn("hsa:", question)
         self.assertIn('"canonical_id":"ko:K00001"', question)
+
+    def test_species_neutral_profile_rejects_unneutralized_names_and_text(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not fully neutralized"):
+            render_pathway_question(
+                observed_payload("ko:K00001"),
+                next_layer_index=1,
+                organism="hsa",
+                profile=SPECIES_NEUTRAL_IDS_NO_ORGANISM,
+            )
 
     def test_species_neutral_profile_fails_closed_on_organism_prefixed_id(self) -> None:
         with self.assertRaisesRegex(ValueError, "organism-prefixed IDs"):

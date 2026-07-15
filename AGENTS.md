@@ -22,7 +22,10 @@
 - `KEGG_all_new/processed_graph` has been restored and SHA256-verified on CFFF: 1,368,605 JSON files in 10,859 top-level directories.
 - Relation and reaction truth comes from `processed_graph`; `processed` is optional path/text reconciliation only.
 - Phenotype supervision is disabled for the core dataset. `phenotype_status=not_annotated` is metadata and must never be interpreted as a negative phenotype label.
-- The strict `pathway_v3_cap256` release must pass its read-only `data_audit.json` before it is used by training or evaluation.
+- The formal release is `pathway_v4_full`. Its full-corpus canonical index and
+  read-only `data_audit.json` must pass before training or evaluation. Source
+  holdout selection uses only coverage statistics stored in this data snapshot;
+  it does not claim phylogenetic balance.
 
 ## Verification
 

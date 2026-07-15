@@ -26,7 +26,7 @@ Implementation provenance and deliberate corrections are in
 | Task | Scientific question | Required artifact | Reportable output |
 | --- | --- | --- | --- |
 | 0 AE/HNN self-consistency | Does the AE preserve hidden states, and does the learned ODE follow held-out latent trajectories? | NPZ hidden/reconstruction and observed/rollout latents, or observed latents plus `hamiltonian_dynamics.pt` | reconstruction MSE/cosine and rollout error curves at fixed horizons |
-| 1 substep CSP | Given a pathway prefix, are the next graph layer's atomic `A relation B` events and remaining layer sequence correct? | v3 prediction CSV/JSON with structured `remaining_layers/events`; v2 only through an audited fallback | layer-set event metrics by default; ordered-substep metrics only with causal-order provenance |
+| 1 substep CSP | Given a pathway prefix, are the next graph layer's atomic rich-action events and remaining layer sequence correct? | v4 prediction CSV/JSON with structured `remaining_layers/events`; v2/v3 only through audited compatibility paths | layer-set event metrics by default; ordered-substep metrics only with causal-order provenance |
 | 2 PCTE | Are predicted and gold answer trajectories close in the same fixed latent representation? | paired latent NPZ plus representation manifest | DTW PCTE; not HNN self-consistency |
 | 3 causal reranking | Does the LLM rank a validated path above direction-reversed, shuffled, and unrelated candidates? | expert-validated candidate JSON/JSONL | LLM Top-1/MRR/rejection; optional validation-calibrated combined score |
 | 4 knockout/rescue | Do calibrated phenotype predictions match observed KO effects and rank true rescue interventions? | real intervention cases, test labels, validation-calibrated scorer | Brier/accuracy, KO direction, rescue Hit@1/MRR |
@@ -35,19 +35,26 @@ Implementation provenance and deliberate corrections are in
 
 ## Atomic substep schema
 
-The preferred Task 1 answer is the same v3 continuation contract used by training:
+The preferred Task 1 answer is the same v4 continuation contract used by training:
 
 ```json
 {
-  "schema_version": "pathway_continuation_v3",
+  "schema_version": "pathway_continuation_v4",
   "remaining_layers": [
     {
       "layer_index": 2,
       "events": [
         {
-          "source": [{"canonical_id": "hsa:207", "name": "AKT1"}],
-          "relation": "phosphorylation",
-          "target": [{"canonical_id": "hsa:572", "name": "BAD"}],
+          "event_type": "relation",
+          "source": [{"canonical_id": "hsa:207", "aliases": [], "name": "AKT1"}],
+          "action": {
+            "kind": "relation",
+            "relation_class": "PPrel",
+            "subtypes": ["activation", "phosphorylation"],
+            "reversibility": null
+          },
+          "mediators": [],
+          "target": [{"canonical_id": "hsa:572", "aliases": [], "name": "BAD"}],
           "text": "AKT1 phosphorylates BAD."
         }
       ]
@@ -56,13 +63,13 @@ The preferred Task 1 answer is the same v3 continuation contract used by trainin
 }
 ```
 
-The adapter accepts v3 `remaining_layers/events` directly and scores canonical
-source/target IDs plus the structured relation without reparsing the event
-sentence. Historical v2 `remaining_steps` remains readable; only that fallback
+The adapter accepts v4 `remaining_layers/events` directly and scores canonical
+source/target/mediator IDs plus the complete structured action without reparsing
+the event sentence. Historical v2/v3 payloads remain readable; only text fallback
 splits sentence/semicolon clauses with exactly one supported relation. Parser
 validity and excluded coverage are always emitted alongside accuracy.
 
-Important dataset boundary: the active v3 builder reads canonical relation and
+Important dataset boundary: the active v4 builder reads canonical relation and
 reaction events from `processed_graph`. The 2026-07-11 full server CSV predates
 that schema, so `prepare_experiment_data.py` marks its recovered boundaries as
 `sentence_parser_v1`. If two legacy source items had no punctuation delimiter,
@@ -139,9 +146,9 @@ python -m downstream.new_tasks.task1_substep_csp \
   --output-dir /path/to/results/task1
 ```
 
-Natural-language fallback is useful for auditing the current dataset, but a
+Natural-language fallback is useful for auditing historical datasets, but a
 publishable Task 1 table should freeze parser version, inspect parse failures,
-and preferably export explicit structured gold substeps before inference.
+and use the v4 structured gold events before inference.
 The manifest pins `dataset_id`, held-out `split`, immutable model checkpoint,
 and parser version. This implementation requires
 `parser_version: "atomic_relation_v2"`; use `ordering_mode: "layer_set"` for

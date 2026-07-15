@@ -18,7 +18,7 @@ class ResearchPlanTests(unittest.TestCase):
 
     def test_dataset_profile_requires_all_three_diagnostic_tests(self) -> None:
         matrix = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
-        del matrix["dataset_profile"]["diagnostic_tests"]["test_organism_only"]
+        del matrix["dataset_profile"]["diagnostic_tests"]["test_organism"]
         errors = validate_dataset_profile(matrix)
         self.assertTrue(any("all three test partitions" in error for error in errors))
 

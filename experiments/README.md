@@ -11,11 +11,14 @@ the first result can be attributed.
 | `exp001_hnn_reconae_joint_direct` | stage-2 SFT plus `J grad H` |
 | `exp002_forced_damped_hnn_reconae_joint_direct` | primary stage-2 SFT plus `(J-rI) grad H + F(t)` |
 
-The active release is `data/pathway_v3_cap256/`. Its test set is disjoint from
-training by both held-out organism and canonical five-digit KEGG pathway
-family; validation holds out separate complete families. The scheduler refuses
-to start unless the generated read-only `data_audit.json` has passed and still
-matches all three CSV hashes.
+The active release contract is `data/pathway_v4_full/`. The three primary
+partitions use disjoint complete five-digit KEGG families on seen source codes;
+`test_organism` holds out source codes while reusing train families, and
+`test_strict` holds out both source codes and every non-train family. Source holdout is
+stratified only by coverage statistics in the canonical data snapshot and does
+not claim phylogenetic balance. The scheduler refuses to start unless the
+generated read-only `data_audit.json` has passed and all five CSV/record pairs,
+source graphs, and declared hashes still match.
 
 All mutable artifacts are seed-scoped:
 
@@ -35,16 +38,14 @@ the real tokenizer and excludes any row whose complete prompt plus closed JSON
 answer exceeds that budget. Trainers fail if an oversized row slips through;
 they never truncate an assistant JSON target.
 
-The materialized rows are eligible prefix views, not the per-epoch training count.
-Controlled training uses one deterministic prefix per biological record per
-epoch. Across epochs,
-each record rotates through short-, middle-, and long-continuation views. SFT
-weights short continuation twice per four-record-epochs; HNN/FDHNN weights long
-continuation twice so trajectory losses still see multi-step targets. Validation
-uses one seed-fixed prefix per record with a balanced short/middle/long policy
-and never rotates across epochs. This prevents long pathways from receiving
-k-fold weight in either optimization or checkpoint selection and cuts per-epoch
-examples without permanently dropping a record.
+The formal v4 release contains exactly one seed-fixed prefix per selected
+biological record. A global constrained matcher balances the actually eligible
+short/middle/long horizons as tightly as mathematically possible after the
+8192-token filter. The current trainers therefore see the same registered view
+on every epoch; `one_per_record` remains enabled as an identity guard but does
+not rotate a one-row group. Alternative epoch-wise horizon schedules are a
+separate rematerialization experiment from the complete canonical index, not a
+silent change during the controlled matrix.
 
 Direct inference pins per-process `batch_size=1`. The first greedy attempt uses
 up to 4096 new tokens. Invalid or unclosed JSON is regenerated with an explicit
@@ -68,23 +69,23 @@ from `data_audit.json`.
 
 ```bash
 export CHATPATHWAY_PROFILE=cfff
-python -m experiments.run_experiment prepare-structured-data \
-  --max-records-per-family 256 \
+python -m experiments.run_experiment prepare-structured-data-v4 \
   --minimum-train-records 12000 \
-  --seed 20260711 \
-  --overwrite
+  --seed 20260715 \
+  --overwrite-release
 python -m experiments.run_experiment download-model
 python -m experiments.run_experiment check-assets \
   --phase train --ids base000_shared_sft_reconae --profile cfff \
   --create-output-dirs --strict
 ```
 
-The builder reconstructs event sets directly from `processed_graph`, selects a
-family-capped diverse release, writes record JSONL plus compatibility CSVs,
-and creates `dataset_manifest.json` and read-only `data_audit.json`. The default
-minimum of 12,000 train records prevents silently releasing another short
-training run. The audit records the actual record/token distribution and a
-rough runtime estimate; the first measured v3 SFT run replaces that estimate.
+The indexer reconstructs complete rich-action event sets from every
+`processed_graph` JSON without sampling or a family cap. Materialization uses a
+conservative 515-million-token one-epoch envelope, writes one record JSONL and
+one compatibility CSV row per selected record, and creates
+`dataset_manifest.json` plus read-only `data_audit.json`. The minimum of 12,000
+train records prevents silently releasing another short run. The first measured
+v4 packed-training throughput replaces the current runtime estimate.
 
 ## One-seed run
 

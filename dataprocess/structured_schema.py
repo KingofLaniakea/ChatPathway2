@@ -1,4 +1,4 @@
-"""Structured graph-event records and the prefix-only v3 model contract."""
+"""Structured graph-event records and the prefix-only v4 model contract."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 from dataprocess.entity_projection import project_record
+from dataprocess.event_text import (
+    TEXT_SOURCE_CANONICAL_FALLBACK,
+    audited_reaction_text,
+    audited_relation_text,
+)
 from dataprocess.prompt_profiles import (
     EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
     PROMPT_PROFILE_METADATA,
@@ -17,16 +22,16 @@ from dataprocess.prompt_profiles import (
 from dataprocess.schemas import CSV_FIELDNAMES, canonical_pathway_family_id
 
 
-DATASET_SCHEMA_VERSION = "structured_pathway_record_v3"
-ANSWER_SCHEMA_VERSION = "pathway_continuation_v3"
-QUESTION_TYPE = "pathway_continuation_v3"
-SUBSTEP_SCHEMA_VERSION = "graph_event_set_v3"
-SUBSTEP_SOURCE = "processed_graph_structured_event_v3"
+DATASET_SCHEMA_VERSION = "structured_pathway_record_v4"
+ANSWER_SCHEMA_VERSION = "pathway_continuation_v4"
+QUESTION_TYPE = "pathway_continuation_v4"
+SUBSTEP_SCHEMA_VERSION = "graph_event_set_v4"
+SUBSTEP_SOURCE = "processed_graph_structured_event_v4"
 
-# Keep the legacy text-dataset header unchanged.  The structured v3 release
+# Keep the tabular training header stable.  The structured v4 release
 # carries the identities and conditioning metadata needed to audit paired
 # prompt profiles and to merge inference shards without losing provenance.
-V3_CSV_FIELDNAMES = CSV_FIELDNAMES + [
+V4_CSV_FIELDNAMES = CSV_FIELDNAMES + [
     "base_sample_id",
     "graph_id",
     "view_id",
@@ -37,6 +42,9 @@ V3_CSV_FIELDNAMES = CSV_FIELDNAMES + [
     "prefix_horizon",
     "split",
 ]
+# Header-only import compatibility for historical audit helpers.  It does not
+# change any v4 schema/version field or release filename.
+V3_CSV_FIELDNAMES = V4_CSV_FIELDNAMES
 
 RELATION_TYPES = frozenset({"ECrel", "PPrel", "GErel", "PCrel", "maplink"})
 REACTION_TYPES = frozenset({"reversible", "irreversible"})
@@ -59,8 +67,12 @@ CONTEXT_RELATION_SUBTYPES = frozenset(
         "glycosylation",
         "ubiquitination",
         "methylation",
+        "demethylation",
+        "indirect",
     }
 )
+
+ACTION_KINDS = frozenset({"relation", "conversion"})
 MISSING_RELATION_SUBTYPE = "missing interaction"
 
 TOPOLOGY_BACKBONE = "backbone"
@@ -169,15 +181,15 @@ def _strict_renderable(record: dict[str, Any]) -> bool:
 def _node_projection(
     node_id: int,
     node_lookup: dict[int, dict[str, Any]],
-    cache: dict[int, tuple[tuple[dict[str, str], ...], dict[str, object]]],
+    cache: dict[int, tuple[tuple[dict[str, object], ...], dict[str, object]]],
     stack: tuple[int, ...] = (),
-) -> tuple[tuple[dict[str, str], ...], dict[str, object]]:
-    """Return all trusted identifiers for one graph node plus raw provenance.
+) -> tuple[tuple[dict[str, object], ...], dict[str, object]]:
+    """Return biological participants for one graph node plus raw provenance.
 
     A KGML group has no canonical identifier of its own.  Such a node is
     projected to the complete, recursively validated component entity set.
-    Multi-ID entries likewise remain multiple model entities instead of being
-    silently collapsed to the producer's first token.
+    A non-group entry remains one participant; additional resolved identifiers
+    are aliases, not duplicate source or target entities.
     """
 
     if node_id in cache:
@@ -201,6 +213,14 @@ def _node_projection(
     entity_type = str(node.get("entity_type") or "").strip()
     raw_resolved_ids = node.get("resolved_ids")
     raw_component_ids = node.get("component_entry_ids")
+    raw_aliases = node.get("aliases")
+    if not isinstance(raw_aliases, list) or any(
+        not isinstance(item, str) or not item.strip() for item in raw_aliases
+    ):
+        raise EventValidationError(f"node[{node_id}].aliases must be a string list")
+    aliases = tuple(item.strip() for item in raw_aliases)
+    if len(set(aliases)) != len(aliases):
+        raise EventValidationError(f"node[{node_id}].aliases contains duplicates")
     if entity_type == "group":
         component_ids = _strict_integer_list(
             raw_component_ids,
@@ -208,7 +228,9 @@ def _node_projection(
         )
         if not component_ids:
             raise EventValidationError(f"group node_id={node_id} has no components")
-        model_entities: list[dict[str, str]] = []
+        if aliases:
+            raise EventValidationError(f"group node_id={node_id} cannot declare aliases")
+        model_entities: list[dict[str, object]] = []
         effective_ids: list[str] = []
         for component_id in component_ids:
             component_entities, _ = _node_projection(
@@ -240,19 +262,27 @@ def _node_projection(
             raise EventValidationError(
                 f"event endpoint node_id={node_id} canonical_id is not a resolved ID"
             )
+        canonical_id = canonical_id.strip()
+        expected_aliases = tuple(
+            identifier for identifier in resolved_ids if identifier != canonical_id
+        )
+        if set(aliases) != set(expected_aliases):
+            raise EventValidationError(
+                f"event endpoint node_id={node_id} aliases disagree with resolved IDs"
+            )
         component_ids = _strict_integer_list(
             raw_component_ids,
             field=f"node[{node_id}].component_entry_ids",
         ) if raw_component_ids else ()
-        effective_ids = list(resolved_ids)
+        effective_ids = [canonical_id]
         model_entities = [
-            {"canonical_id": canonical_id, "name": display_name}
-            for canonical_id in effective_ids
+            {
+                "canonical_id": canonical_id,
+                "aliases": list(expected_aliases),
+                "name": display_name,
+            }
         ]
 
-    aliases = node.get("aliases")
-    if not isinstance(aliases, list) or any(not isinstance(item, str) for item in aliases):
-        raise EventValidationError(f"node[{node_id}].aliases must be a string list")
     provenance: dict[str, object] = {
         "node_id": node_id,
         "entity_type": entity_type,
@@ -271,7 +301,7 @@ def _node_projection(
     return output
 
 
-def node_value(node: dict[str, Any]) -> dict[str, str]:
+def node_value(node: dict[str, Any]) -> dict[str, object]:
     """Compatibility helper for a single, already trusted non-group node."""
 
     resolved_ids = _strict_strings(node.get("resolved_ids"), field="resolved_ids")
@@ -286,7 +316,12 @@ def node_value(node: dict[str, Any]) -> dict[str, str]:
     name = str(node.get("display_name") or "").strip()
     if not name:
         raise EventValidationError("node display_name is empty")
-    return {"canonical_id": canonical_id.strip(), "name": name}
+    canonical_id = canonical_id.strip()
+    return {
+        "canonical_id": canonical_id,
+        "aliases": [identifier for identifier in resolved_ids if identifier != canonical_id],
+        "name": name,
+    }
 
 
 def _integer_values(record: dict[str, Any], key: str) -> tuple[int, ...]:
@@ -475,23 +510,67 @@ def reaction_text(
 
 
 @dataclass(frozen=True)
+class StructuredAction:
+    """The complete model-visible action annotation for one event."""
+
+    kind: str
+    relation_class: str | None
+    subtypes: tuple[str, ...]
+    reversibility: str | None
+
+    def model_object(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "relation_class": self.relation_class,
+            "subtypes": list(self.subtypes),
+            "reversibility": self.reversibility,
+        }
+
+
+def semantic_event_id(
+    *,
+    event_type: str,
+    source: Sequence[dict[str, object]],
+    action: StructuredAction,
+    mediators: Sequence[dict[str, object]],
+    target: Sequence[dict[str, object]],
+) -> str:
+    payload = {
+        "event_type": event_type,
+        "source": list(source),
+        "action": action.model_object(),
+        "mediators": list(mediators),
+        "target": list(target),
+    }
+    return stable_id("semantic_event", compact_json(payload))
+
+
+@dataclass(frozen=True)
 class StructuredEvent:
     event_id: str
+    semantic_event_id: str
+    producer_event_ids: tuple[str, ...]
+    producer_renderable_event_ids: tuple[str, ...]
     event_type: str
     source_node_ids: tuple[int, ...]
     target_node_ids: tuple[int, ...]
-    source: tuple[dict[str, str], ...]
-    relation: str
-    target: tuple[dict[str, str], ...]
+    source: tuple[dict[str, object], ...]
+    action: StructuredAction
+    target: tuple[dict[str, object], ...]
     text: str
-    producer_renderable: bool
+    legacy_text: str | None
+    text_source: str
+    # Number of raw producer events for which the archived Step 12 renderer
+    # could emit the exact legacy surface form.  This remains exact after
+    # semantic duplicates are merged within one graph layer.
+    producer_renderable_count: int
     source_entity_provenance: tuple[dict[str, object], ...] = ()
     target_entity_provenance: tuple[dict[str, object], ...] = ()
     mediator_node_ids: tuple[int, ...] = ()
-    mediator: tuple[dict[str, str], ...] = ()
+    mediator: tuple[dict[str, object], ...] = ()
     mediator_entity_provenance: tuple[dict[str, object], ...] = ()
     raw_relation_type: str = ""
-    raw_reaction_name: str = ""
+    raw_reaction_names: tuple[str, ...] = ()
     raw_reaction_type: str = ""
     raw_subtypes: tuple[dict[str, str], ...] = ()
     topology_role: str = TOPOLOGY_BACKBONE
@@ -499,10 +578,29 @@ class StructuredEvent:
     core_included: bool = True
     exclusion_reason: str = ""
 
+    @property
+    def relation(self) -> str:
+        """Stable internal label for legacy evaluators, never the v4 target.
+
+        The model-visible contract always uses the complete ``action`` object;
+        this property only prevents older analysis code from silently reducing
+        reactions to a generic relation.
+        """
+
+        if self.action.kind == "conversion":
+            return f"{self.action.reversibility}_conversion"
+        if self.action.subtypes:
+            return "+".join(
+                _normalized_subtype_label(value) for value in self.action.subtypes
+            )
+        return f"{str(self.action.relation_class or 'relation').casefold()}_relation"
+
     def model_object(self) -> dict[str, object]:
         return {
+            "event_type": self.event_type,
             "source": list(self.source),
-            "relation": self.relation,
+            "action": self.action.model_object(),
+            "mediators": list(self.mediator),
             "target": list(self.target),
             "text": self.text,
         }
@@ -510,14 +608,21 @@ class StructuredEvent:
     def record_object(self) -> dict[str, object]:
         return {
             "event_id": self.event_id,
+            "semantic_event_id": self.semantic_event_id,
+            "producer_event_ids": list(self.producer_event_ids),
+            "producer_renderable_event_ids": list(
+                self.producer_renderable_event_ids
+            ),
             "event_type": self.event_type,
             "source_node_ids": list(self.source_node_ids),
             "target_node_ids": list(self.target_node_ids),
             "source": list(self.source),
-            "relation": self.relation,
+            "action": self.action.model_object(),
             "target": list(self.target),
             "text": self.text,
-            "producer_renderable": self.producer_renderable,
+            "legacy_text": self.legacy_text,
+            "text_source": self.text_source,
+            "producer_renderable_count": self.producer_renderable_count,
             "source_entity_provenance": [dict(value) for value in self.source_entity_provenance],
             "target_entity_provenance": [dict(value) for value in self.target_entity_provenance],
             "mediator_node_ids": list(self.mediator_node_ids),
@@ -526,7 +631,7 @@ class StructuredEvent:
                 dict(value) for value in self.mediator_entity_provenance
             ],
             "raw_relation_type": self.raw_relation_type,
-            "raw_reaction_name": self.raw_reaction_name,
+            "raw_reaction_names": list(self.raw_reaction_names),
             "raw_reaction_type": self.raw_reaction_type,
             "raw_subtypes": [dict(value) for value in self.raw_subtypes],
             "topology_role": self.topology_role,
@@ -600,9 +705,9 @@ class StructuredRecord:
 def _project_nodes(
     node_ids: Sequence[int],
     node_lookup: dict[int, dict[str, Any]],
-    cache: dict[int, tuple[tuple[dict[str, str], ...], dict[str, object]]],
-) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, object], ...]]:
-    model_entities: list[dict[str, str]] = []
+    cache: dict[int, tuple[tuple[dict[str, object], ...], dict[str, object]]],
+) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
+    model_entities: list[dict[str, object]] = []
     provenance: list[dict[str, object]] = []
     for node_id in node_ids:
         node_entities, node_provenance = _node_projection(node_id, node_lookup, cache)
@@ -617,7 +722,7 @@ def event_from_relation(
     record: dict[str, Any],
     node_lookup: dict[int, dict[str, Any]],
     projection_cache: dict[
-        int, tuple[tuple[dict[str, str], ...], dict[str, object]]
+        int, tuple[tuple[dict[str, object], ...], dict[str, object]]
     ] | None = None,
 ) -> StructuredEvent:
     relation_id = _strict_event_id(record, "relation_id")
@@ -669,16 +774,47 @@ def event_from_relation(
         core_included = True
         exclusion_reason = ""
 
+    action = StructuredAction(
+        kind="relation",
+        relation_class=relation_type,
+        # KGML can repeat the same subtype annotation.  The model-visible
+        # action is a set-like biological annotation, while ``raw_subtypes``
+        # below retains every producer annotation and mediator value.
+        subtypes=tuple(dict.fromkeys(subtype_names)),
+        reversibility=None,
+    )
+    text, legacy_text, text_source = audited_relation_text(
+        relation_class=relation_type,
+        subtypes=action.subtypes,
+        sources=sources,
+        targets=targets,
+        mediators=mediators,
+    )
+    if not renderable:
+        legacy_text = None
+        text_source = TEXT_SOURCE_CANONICAL_FALLBACK
+    producer_event_id = f"relation:{relation_id}"
     return StructuredEvent(
-        event_id=f"relation:{relation_id}",
+        event_id=producer_event_id,
+        semantic_event_id=semantic_event_id(
+            event_type="relation",
+            source=sources,
+            action=action,
+            mediators=mediators,
+            target=targets,
+        ),
+        producer_event_ids=(producer_event_id,),
+        producer_renderable_event_ids=(producer_event_id,) if renderable else (),
         event_type="relation",
         source_node_ids=source_ids,
         target_node_ids=target_ids,
         source=sources,
-        relation=relation_label(record),
+        action=action,
         target=targets,
-        text=relation_text(record, sources, targets, mediators),
-        producer_renderable=renderable,
+        text=text,
+        legacy_text=legacy_text,
+        text_source=text_source,
+        producer_renderable_count=int(renderable),
         source_entity_provenance=source_provenance,
         target_entity_provenance=target_provenance,
         mediator_node_ids=mediator_ids,
@@ -697,7 +833,7 @@ def event_from_reaction(
     record: dict[str, Any],
     node_lookup: dict[int, dict[str, Any]],
     projection_cache: dict[
-        int, tuple[tuple[dict[str, str], ...], dict[str, object]]
+        int, tuple[tuple[dict[str, object], ...], dict[str, object]]
     ] | None = None,
 ) -> StructuredEvent:
     reaction_id = _strict_event_id(record, "reaction_id")
@@ -727,24 +863,45 @@ def event_from_reaction(
     }
     if reaction_type == "reversible":
         arcs.update((target_id, source_id) for source_id, target_id in tuple(arcs))
-    relation = (
-        "reversible_conversion"
-        if reaction_type == "reversible"
-        else "irreversible_conversion"
+    action = StructuredAction(
+        kind="conversion",
+        relation_class=None,
+        subtypes=(),
+        reversibility=reaction_type,
     )
+    text, legacy_text, text_source = audited_reaction_text(
+        reversibility=reaction_type,
+        sources=sources,
+        targets=targets,
+    )
+    if not renderable:
+        legacy_text = None
+        text_source = TEXT_SOURCE_CANONICAL_FALLBACK
+    producer_event_id = f"reaction:{reaction_id}"
     return StructuredEvent(
-        event_id=f"reaction:{reaction_id}",
+        event_id=producer_event_id,
+        semantic_event_id=semantic_event_id(
+            event_type="reaction",
+            source=sources,
+            action=action,
+            mediators=(),
+            target=targets,
+        ),
+        producer_event_ids=(producer_event_id,),
+        producer_renderable_event_ids=(producer_event_id,) if renderable else (),
         event_type="reaction",
         source_node_ids=source_ids,
         target_node_ids=target_ids,
         source=sources,
-        relation=relation,
+        action=action,
         target=targets,
-        text=reaction_text(record, sources, targets),
-        producer_renderable=renderable,
+        text=text,
+        legacy_text=legacy_text,
+        text_source=text_source,
+        producer_renderable_count=int(renderable),
         source_entity_provenance=source_provenance,
         target_entity_provenance=target_provenance,
-        raw_reaction_name=reaction_name,
+        raw_reaction_names=(reaction_name,),
         raw_reaction_type=reaction_type,
         topology_role=TOPOLOGY_BACKBONE,
         topology_arcs=tuple(sorted(arcs)),
@@ -782,7 +939,7 @@ def graph_events(graph: dict[str, Any]) -> tuple[tuple[StructuredEvent, ...], in
     events: list[StructuredEvent] = []
     rejected_event_count = 0
     projection_cache: dict[
-        int, tuple[tuple[dict[str, str], ...], dict[str, object]]
+        int, tuple[tuple[dict[str, object], ...], dict[str, object]]
     ] = {}
     for position, relation in enumerate(raw_relations):
         if not isinstance(relation, dict):
@@ -837,7 +994,7 @@ def prefix_only_question(
     organism: str,
     prompt_profile: str = EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
 ) -> str:
-    """Render the full v3 output contract plus the observed graph prefix."""
+    """Render the full v4 output contract plus the observed graph prefix."""
 
     return render_pathway_question(
         observed_payload(layers),
@@ -911,7 +1068,7 @@ def csv_row(
     base_sample_id = f"{record.record_id}:prefix={prefix_len}"
     sample_id = f"{base_sample_id}:profile={prompt_profile}"
     profile_metadata = PROMPT_PROFILE_METADATA[prompt_profile]
-    row: dict[str, object] = {field: "" for field in V3_CSV_FIELDNAMES}
+    row: dict[str, object] = {field: "" for field in V4_CSV_FIELDNAMES}
     row.update(
         {
             "sample_id": sample_id,
@@ -976,21 +1133,26 @@ def records_jsonl(records: Iterable[StructuredRecord]) -> Iterable[str]:
 
 _EVENT_RECORD_KEYS = {
     "event_id",
+    "semantic_event_id",
+    "producer_event_ids",
+    "producer_renderable_event_ids",
     "event_type",
     "source_node_ids",
     "target_node_ids",
     "source",
-    "relation",
+    "action",
     "target",
     "text",
-    "producer_renderable",
+    "legacy_text",
+    "text_source",
+    "producer_renderable_count",
     "source_entity_provenance",
     "target_entity_provenance",
     "mediator_node_ids",
     "mediator",
     "mediator_entity_provenance",
     "raw_relation_type",
-    "raw_reaction_name",
+    "raw_reaction_names",
     "raw_reaction_type",
     "raw_subtypes",
     "topology_role",
@@ -998,6 +1160,8 @@ _EVENT_RECORD_KEYS = {
     "core_included",
     "exclusion_reason",
 }
+
+_ACTION_KEYS = {"kind", "relation_class", "subtypes", "reversibility"}
 
 _ENTITY_PROVENANCE_KEYS = {
     "node_id",
@@ -1041,17 +1205,23 @@ def _record_entity_provenance_valid(value: object) -> bool:
         return False
     canonical_id = value.get("canonical_id")
     if value.get("entity_type") == "group":
-        return canonical_id in (None, "") and bool(value["component_entry_ids"])
+        return (
+            canonical_id in (None, "")
+            and bool(value["component_entry_ids"])
+            and value["aliases"] == []
+        )
     return (
         isinstance(canonical_id, str)
         and canonical_id in value["resolved_ids"]
-        and set(effective_ids) == set(value["resolved_ids"])
+        and effective_ids == [canonical_id]
+        and set(value["aliases"])
+        == set(value["resolved_ids"]) - {canonical_id}
     )
 
 
 def _record_event_from_object(value: object) -> StructuredEvent:
     if not isinstance(value, dict) or set(value) != _EVENT_RECORD_KEYS:
-        raise ValueError("structured record event does not exactly match v3")
+        raise ValueError("structured record event does not exactly match v4")
     raw_source = value.get("source")
     raw_target = value.get("target")
     raw_mediator = value.get("mediator")
@@ -1092,11 +1262,16 @@ def _record_event_from_object(value: object) -> StructuredEvent:
         raise ValueError("structured record event entity provenance is invalid")
 
     def projected_ids(provenance: Sequence[dict[str, object]]) -> list[str]:
-        return [
-            str(canonical_id)
-            for item in provenance
-            for canonical_id in item["effective_resolved_ids"]
-        ]
+        # Several raw KGML occurrence nodes may resolve to the same biological
+        # participant.  v4 keeps all node provenance but exposes the entity
+        # once, so compare against the stable distinct projection.
+        values: list[str] = []
+        for item in provenance:
+            for canonical_id in item["effective_resolved_ids"]:
+                identifier = str(canonical_id)
+                if identifier not in values:
+                    values.append(identifier)
+        return values
 
     if [item["canonical_id"] for item in raw_source] != projected_ids(source_provenance):
         raise ValueError("structured record source projection loses resolved IDs")
@@ -1106,15 +1281,79 @@ def _record_event_from_object(value: object) -> StructuredEvent:
         raise ValueError("structured record mediator projection loses resolved IDs")
     if not str(value.get("event_id") or "").strip():
         raise ValueError("structured record event_id is empty")
+    semantic_id = str(value.get("semantic_event_id") or "").strip()
+    producer_event_ids = value.get("producer_event_ids")
+    producer_renderable_event_ids = value.get("producer_renderable_event_ids")
+    if (
+        not semantic_id
+        or not isinstance(producer_event_ids, list)
+        or not producer_event_ids
+        or not all(isinstance(item, str) and item.strip() for item in producer_event_ids)
+        or len(set(producer_event_ids)) != len(producer_event_ids)
+        or value["event_id"] != producer_event_ids[0]
+        or not isinstance(producer_renderable_event_ids, list)
+        or not all(
+            isinstance(item, str) and item.strip()
+            for item in producer_renderable_event_ids
+        )
+        or len(set(producer_renderable_event_ids))
+        != len(producer_renderable_event_ids)
+        or not set(producer_renderable_event_ids).issubset(producer_event_ids)
+    ):
+        raise ValueError("structured record event identities are invalid")
     event_type = value.get("event_type")
     if event_type not in {"relation", "reaction"}:
         raise ValueError("structured record event_type is invalid")
-    if not isinstance(value.get("relation"), str) or not value["relation"].strip():
-        raise ValueError("structured record relation is empty")
+    raw_action = value.get("action")
+    if not isinstance(raw_action, dict) or set(raw_action) != _ACTION_KEYS:
+        raise ValueError("structured record action is invalid")
+    kind = raw_action.get("kind")
+    relation_class = raw_action.get("relation_class")
+    action_subtypes = raw_action.get("subtypes")
+    reversibility = raw_action.get("reversibility")
+    if (
+        kind not in ACTION_KINDS
+        or not isinstance(action_subtypes, list)
+        or not all(isinstance(item, str) and item.strip() for item in action_subtypes)
+        or len(set(action_subtypes)) != len(action_subtypes)
+    ):
+        raise ValueError("structured record action fields are invalid")
+    action = StructuredAction(
+        kind=str(kind),
+        relation_class=str(relation_class) if relation_class is not None else None,
+        subtypes=tuple(action_subtypes),
+        reversibility=str(reversibility) if reversibility is not None else None,
+    )
+    expected_semantic_id = semantic_event_id(
+        event_type=str(event_type),
+        source=raw_source,
+        action=action,
+        mediators=raw_mediator,
+        target=raw_target,
+    )
+    if semantic_id != expected_semantic_id:
+        raise ValueError("structured record semantic_event_id does not match model event")
     if not isinstance(value.get("text"), str) or not value["text"].strip():
         raise ValueError("structured record text is empty")
-    if not isinstance(value.get("producer_renderable"), bool):
-        raise ValueError("structured record producer_renderable must be boolean")
+    legacy_text = value.get("legacy_text")
+    if legacy_text is not None and (
+        not isinstance(legacy_text, str) or not legacy_text.strip()
+    ):
+        raise ValueError("structured record legacy_text is invalid")
+    if not isinstance(value.get("text_source"), str) or not value["text_source"].strip():
+        raise ValueError("structured record text_source is invalid")
+    producer_renderable_count = value.get("producer_renderable_count")
+    if (
+        not isinstance(producer_renderable_count, int)
+        or isinstance(producer_renderable_count, bool)
+        or producer_renderable_count < 0
+        or producer_renderable_count > len(producer_event_ids)
+        or producer_renderable_count != len(producer_renderable_event_ids)
+        or (producer_renderable_count > 0) != (legacy_text is not None)
+    ):
+        raise ValueError(
+            "producer_renderable_count disagrees with producer IDs or legacy text"
+        )
     topology_role = value.get("topology_role")
     if topology_role not in TOPOLOGY_ROLES:
         raise ValueError("structured record topology_role is invalid")
@@ -1148,37 +1387,63 @@ def _record_event_from_object(value: object) -> StructuredEvent:
     if event_type == "reaction":
         if value.get("raw_reaction_type") not in REACTION_TYPES:
             raise ValueError("reaction raw_reaction_type is invalid")
-        expected_relation = (
-            "reversible_conversion"
-            if value["raw_reaction_type"] == "reversible"
-            else "irreversible_conversion"
-        )
-        if value.get("relation") != expected_relation:
-            raise ValueError("reaction relation label is not normalized")
+        raw_reaction_names = value.get("raw_reaction_names")
+        if (
+            not isinstance(raw_reaction_names, list)
+            or not raw_reaction_names
+            or not all(isinstance(item, str) and item.strip() for item in raw_reaction_names)
+            or len(set(raw_reaction_names)) != len(raw_reaction_names)
+        ):
+            raise ValueError("reaction raw_reaction_names are invalid")
+        if (
+            action.kind != "conversion"
+            or action.relation_class is not None
+            or action.subtypes
+            or action.reversibility != value["raw_reaction_type"]
+        ):
+            raise ValueError("reaction action does not match raw provenance")
         if value.get("raw_relation_type") or raw_subtypes or mediator_node_ids:
             raise ValueError("reaction contains relation-only provenance")
     else:
+        raw_reaction_names = value.get("raw_reaction_names")
         if value.get("raw_relation_type") not in RELATION_TYPES:
             raise ValueError("relation raw_relation_type is invalid")
-        if value.get("raw_reaction_name") or value.get("raw_reaction_type"):
+        raw_subtype_names = tuple(
+            dict.fromkeys(
+                str(item["name"]).strip().casefold() for item in raw_subtypes
+            )
+        )
+        if (
+            action.kind != "relation"
+            or action.relation_class != value["raw_relation_type"]
+            or action.subtypes != raw_subtype_names
+            or action.reversibility is not None
+        ):
+            raise ValueError("relation action does not match raw provenance")
+        if raw_reaction_names != [] or value.get("raw_reaction_type"):
             raise ValueError("relation contains reaction-only provenance")
     return StructuredEvent(
         event_id=str(value["event_id"]),
+        semantic_event_id=semantic_id,
+        producer_event_ids=tuple(producer_event_ids),
+        producer_renderable_event_ids=tuple(producer_renderable_event_ids),
         event_type=str(event_type),
         source_node_ids=source_node_ids,
         target_node_ids=target_node_ids,
         source=tuple(dict(item) for item in raw_source),
-        relation=str(value["relation"]),
+        action=action,
         target=tuple(dict(item) for item in raw_target),
         text=str(value["text"]),
-        producer_renderable=value["producer_renderable"],
+        legacy_text=str(legacy_text) if legacy_text is not None else None,
+        text_source=str(value["text_source"]),
+        producer_renderable_count=producer_renderable_count,
         source_entity_provenance=tuple(dict(item) for item in source_provenance),
         target_entity_provenance=tuple(dict(item) for item in target_provenance),
         mediator_node_ids=mediator_node_ids,
         mediator=tuple(dict(item) for item in raw_mediator),
         mediator_entity_provenance=tuple(dict(item) for item in mediator_provenance),
         raw_relation_type=str(value.get("raw_relation_type") or ""),
-        raw_reaction_name=str(value.get("raw_reaction_name") or ""),
+        raw_reaction_names=tuple(raw_reaction_names),
         raw_reaction_type=str(value.get("raw_reaction_type") or ""),
         raw_subtypes=tuple(dict(item) for item in raw_subtypes),
         topology_role=str(topology_role),
@@ -1209,18 +1474,18 @@ def record_from_object(value: dict[str, Any]) -> StructuredRecord:
         "parser_source",
     }
     if set(value) != expected_record_keys:
-        raise ValueError("structured record top-level keys do not exactly match v3")
+        raise ValueError("structured record top-level keys do not exactly match v4")
     if value.get("schema_version") != DATASET_SCHEMA_VERSION:
         raise ValueError("unsupported structured record schema_version")
     if value.get("phenotype_status") != "not_annotated":
         raise ValueError("structured record phenotype_status must be not_annotated")
     if value.get("parser_source") != SUBSTEP_SOURCE:
-        raise ValueError("structured record parser_source does not match v3")
+        raise ValueError("structured record parser_source does not match v4")
     raw_layers = value.get("layers")
     if not isinstance(raw_layers, list) or not raw_layers:
         raise ValueError("structured record layers must be a non-empty list")
     layers: list[StructuredLayer] = []
-    seen_event_ids: set[str] = set()
+    seen_producer_event_ids: set[str] = set()
     previous_distance: int | None = None
     for expected_layer_index, layer_value in enumerate(raw_layers):
         if not isinstance(layer_value, dict) or set(layer_value) != {
@@ -1228,7 +1493,7 @@ def record_from_object(value: dict[str, Any]) -> StructuredRecord:
             "distance_to_sink",
             "events",
         }:
-            raise ValueError("structured record layer does not exactly match v3")
+            raise ValueError("structured record layer does not exactly match v4")
         if layer_value.get("layer_index") != expected_layer_index:
             raise ValueError("structured record layer indices must be consecutive")
         distance = layer_value.get("distance_to_sink")
@@ -1243,10 +1508,19 @@ def record_from_object(value: dict[str, Any]) -> StructuredRecord:
         events = tuple(_record_event_from_object(item) for item in raw_events)
         if any(not event.core_included for event in events):
             raise ValueError("structured record layer contains a non-core event")
+        semantic_ids = [event.semantic_event_id for event in events]
+        if len(set(semantic_ids)) != len(semantic_ids):
+            raise ValueError(
+                "structured record repeats a model-visible semantic event within one layer"
+            )
         for event in events:
-            if event.event_id in seen_event_ids:
-                raise ValueError("structured record repeats an event within one view")
-            seen_event_ids.add(event.event_id)
+            duplicated = set(event.producer_event_ids) & seen_producer_event_ids
+            if duplicated:
+                raise ValueError(
+                    "structured record repeats producer event IDs within one view: "
+                    + ", ".join(sorted(duplicated)[:10])
+                )
+            seen_producer_event_ids.update(event.producer_event_ids)
         layers.append(
             StructuredLayer(
                 layer_index=expected_layer_index,
@@ -1265,9 +1539,13 @@ def record_from_object(value: dict[str, Any]) -> StructuredRecord:
     if int(value.get("graph_excluded_noncore_event_count", -1)) != len(excluded_events):
         raise ValueError("structured record excluded event count disagrees")
     for event in excluded_events:
-        if event.event_id in seen_event_ids:
-            raise ValueError("structured record event exists in core and excluded sets")
-        seen_event_ids.add(event.event_id)
+        duplicated = set(event.producer_event_ids) & seen_producer_event_ids
+        if duplicated:
+            raise ValueError(
+                "structured record producer event exists in core and excluded sets: "
+                + ", ".join(sorted(duplicated)[:10])
+            )
+        seen_producer_event_ids.update(event.producer_event_ids)
 
     sink_node_ids = _strict_integer_list(
         value.get("sink_node_ids"), field="record.sink_node_ids"
@@ -1289,7 +1567,7 @@ def record_from_object(value: dict[str, Any]) -> StructuredRecord:
     missing_count = int(value["graph_missing_endpoint_event_count"])
     if missing_count != 0:
         raise ValueError("materialized structured record contains rejected graph events")
-    if graph_event_count < len(seen_event_ids):
+    if graph_event_count < len(seen_producer_event_ids):
         raise ValueError("structured record graph_event_count is too small")
     record = StructuredRecord(
         graph_id=graph_id,
@@ -1313,11 +1591,21 @@ def record_from_object(value: dict[str, Any]) -> StructuredRecord:
 
 
 def _record_entity_valid(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "canonical_id",
+        "aliases",
+        "name",
+    }:
+        return False
+    canonical_id = value.get("canonical_id")
+    aliases = value.get("aliases")
     return (
-        isinstance(value, dict)
-        and set(value) == {"canonical_id", "name"}
-        and isinstance(value.get("canonical_id"), str)
-        and bool(value["canonical_id"].strip())
+        isinstance(canonical_id, str)
+        and bool(canonical_id.strip())
+        and isinstance(aliases, list)
+        and all(isinstance(item, str) and item.strip() for item in aliases)
+        and len(set(aliases)) == len(aliases)
+        and canonical_id not in aliases
         and isinstance(value.get("name"), str)
         and bool(value["name"].strip())
     )
@@ -1334,7 +1622,9 @@ __all__ = [
     "RELATION_TYPES",
     "SUBSTEP_SCHEMA_VERSION",
     "SUBSTEP_SOURCE",
+    "V4_CSV_FIELDNAMES",
     "V3_CSV_FIELDNAMES",
+    "StructuredAction",
     "StructuredEvent",
     "StructuredLayer",
     "StructuredRecord",
@@ -1351,6 +1641,7 @@ __all__ = [
     "records_jsonl",
     "record_from_object",
     "selected_prefix_lengths",
+    "semantic_event_id",
     "stable_id",
     "total_training_tokens",
     "TOPOLOGY_BACKBONE",

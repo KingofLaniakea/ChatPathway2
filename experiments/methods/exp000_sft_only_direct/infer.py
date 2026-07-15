@@ -16,7 +16,7 @@ if __name__ == "__main__":
             "--base-model", asset_path("models/qwen3_8B"),
             "--adapter", seeded_asset_path("checkpoints/shared/pathway_sft/checkpoint_best"),
             "--require-complete", seeded_asset_path("checkpoints/shared/pathway_sft/run_complete.json"),
-            "--input", asset_path("data/pathway_v3_cap256/test_pathway_continuation_v3.csv"),
+            "--input", asset_path("data/pathway_v4_full/test_pathway_continuation_v4.csv"),
             "--output", seeded_asset_path("runs/experiments/exp000_sft_only_direct/direct.csv"),
             "--progress-output", seeded_asset_path("runs/experiments/exp000_sft_only_direct/direct.progress.jsonl"),
         ],
