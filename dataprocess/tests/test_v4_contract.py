@@ -79,6 +79,21 @@ def relation(relation_id: int, source: int, target: int) -> dict[str, object]:
     }
 
 
+def reaction(
+    reaction_id: int,
+    sources: list[int],
+    targets: list[int],
+) -> dict[str, object]:
+    return {
+        "reaction_id": reaction_id,
+        "reaction_name": f"rn:R{reaction_id:05d}",
+        "reaction_type": "irreversible",
+        "substrate_entry_ids": sources,
+        "product_entry_ids": targets,
+        "renderable": True,
+    }
+
+
 def graph() -> dict[str, object]:
     return {
         "metadata": {
@@ -146,6 +161,55 @@ class V4EventContractTests(unittest.TestCase):
         self.assertTrue(parsed.strict_schema_valid)
         self.assertEqual(parsed.substeps[0].relation, "pprel:activation")
         self.assertEqual(parsed.substeps[0].mediators, ())
+
+    def test_endpoint_order_survives_layer_merge_and_round_trip(self) -> None:
+        payload = graph()
+        payload["relations"] = []
+        payload["reactions"] = [reaction(1, [2, 1], [3])]
+        records = build_structured_records(
+            payload,
+            graph_id="graph:ordered",
+            source_graph_json="aaa/aaa00010.json",
+        )
+        self.assertEqual(len(records), 1)
+        event = records[0].layers[0].events[0]
+        self.assertEqual(event.source_node_ids, (2, 1))
+        self.assertEqual(
+            [value["canonical_id"] for value in event.source],
+            ["ko:K00002", "ko:K00001"],
+        )
+        rebuilt = record_from_object(records[0].record_object())
+        self.assertEqual(rebuilt.record_object(), records[0].record_object())
+
+    def test_duplicate_occurrence_entity_is_deduplicated_but_auditable(self) -> None:
+        payload = graph()
+        payload["relations"] = []
+        duplicate = node(4, "A second occurrence", ["ko:K00001", "ec:2.2.2.2"])
+        payload["nodes"].append(duplicate)
+        payload["reactions"] = [reaction(1, [1, 4], [3])]
+        records = build_structured_records(
+            payload,
+            graph_id="graph:duplicate-occurrence",
+            source_graph_json="aaa/aaa00010.json",
+        )
+        self.assertEqual(len(records), 1)
+        event = records[0].layers[0].events[0]
+        self.assertEqual(event.source_node_ids, (1, 4))
+        self.assertEqual(len(event.source_entity_provenance), 2)
+        self.assertEqual(
+            event.source,
+            (
+                {
+                    "canonical_id": "ko:K00001",
+                    "aliases": ["ec:1.1.1.1", "ec:2.2.2.2"],
+                    "name": "A",
+                },
+            ),
+        )
+        self.assertIn("A is irreversibly converted", event.text)
+        self.assertIn("A and A second occurrence are converted", event.legacy_text)
+        rebuilt = record_from_object(records[0].record_object())
+        self.assertEqual(rebuilt.record_object(), records[0].record_object())
 
 
 class V4PolicyTests(unittest.TestCase):

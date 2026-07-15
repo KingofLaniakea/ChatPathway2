@@ -180,6 +180,7 @@ def _merge_endpoint_provenance(
     """Union occurrence-node provenance without duplicating model entities."""
 
     by_node_id: dict[int, dict[str, object]] = {}
+    ordered_node_ids: list[int] = []
     for event in events:
         node_ids = getattr(event, node_ids_attribute)
         provenance = getattr(event, provenance_attribute)
@@ -192,8 +193,15 @@ def _merge_endpoint_provenance(
                 raise ValueError(
                     f"node_id={node_id} has conflicting event provenance"
                 )
+            if prior is None:
+                ordered_node_ids.append(node_id)
             by_node_id[node_id] = materialized
-    ordered_ids = tuple(sorted(by_node_id))
+    # The first event's endpoint order is part of its model-visible semantic
+    # identity.  Sorting occurrence IDs numerically can reverse substrates or
+    # products relative to that identity.  Stable first-seen order preserves
+    # the model projection while later duplicate events still contribute all
+    # distinct occurrence-node evidence.
+    ordered_ids = tuple(ordered_node_ids)
     return ordered_ids, tuple(by_node_id[node_id] for node_id in ordered_ids)
 
 

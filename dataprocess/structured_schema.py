@@ -707,15 +707,42 @@ def _project_nodes(
     node_lookup: dict[int, dict[str, Any]],
     cache: dict[int, tuple[tuple[dict[str, object], ...], dict[str, object]]],
 ) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
+    # KGML may contain several occurrence nodes for the same biological
+    # participant.  Preserve every occurrence below, but expose one stable
+    # model entity per canonical ID.  Aliases from repeated occurrences are
+    # unioned in first-seen order; the first occurrence supplies the display
+    # name so output remains deterministic.
     model_entities: list[dict[str, object]] = []
+    entity_positions: dict[str, int] = {}
     provenance: list[dict[str, object]] = []
     for node_id in node_ids:
         node_entities, node_provenance = _node_projection(node_id, node_lookup, cache)
-        model_entities.extend(dict(entity) for entity in node_entities)
+        for raw_entity in node_entities:
+            entity = dict(raw_entity)
+            canonical_id = str(entity["canonical_id"])
+            position = entity_positions.get(canonical_id)
+            if position is None:
+                entity_positions[canonical_id] = len(model_entities)
+                model_entities.append(entity)
+                continue
+            existing = model_entities[position]
+            aliases = list(existing["aliases"])
+            for alias in entity["aliases"]:
+                if alias != canonical_id and alias not in aliases:
+                    aliases.append(alias)
+            existing["aliases"] = aliases
         provenance.append(dict(node_provenance))
     if not model_entities:
         raise EventValidationError("event endpoint projection is empty")
     return tuple(model_entities), tuple(provenance)
+
+
+def _legacy_entities(
+    provenance: Sequence[dict[str, object]],
+) -> tuple[dict[str, str], ...]:
+    """Recreate the archived renderer's one-name-per-occurrence input."""
+
+    return tuple({"name": str(value["display_name"])} for value in provenance)
 
 
 def event_from_relation(
@@ -789,6 +816,9 @@ def event_from_relation(
         sources=sources,
         targets=targets,
         mediators=mediators,
+        legacy_sources=_legacy_entities(source_provenance),
+        legacy_targets=_legacy_entities(target_provenance),
+        legacy_mediators=_legacy_entities(mediator_provenance),
     )
     if not renderable:
         legacy_text = None
@@ -873,6 +903,8 @@ def event_from_reaction(
         reversibility=reaction_type,
         sources=sources,
         targets=targets,
+        legacy_sources=_legacy_entities(source_provenance),
+        legacy_targets=_legacy_entities(target_provenance),
     )
     if not renderable:
         legacy_text = None

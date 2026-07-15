@@ -158,11 +158,27 @@ def audited_relation_text(
     sources: Sequence[Mapping[str, Any]],
     targets: Sequence[Mapping[str, Any]],
     mediators: Sequence[Mapping[str, Any]],
+    legacy_sources: Sequence[Mapping[str, Any]] | None = None,
+    legacy_targets: Sequence[Mapping[str, Any]] | None = None,
+    legacy_mediators: Sequence[Mapping[str, Any]] | None = None,
 ) -> tuple[str, str | None, str]:
-    """Return ``(model_text, legacy_text, text_source)`` for one relation."""
+    """Return ``(model_text, legacy_text, text_source)`` for one relation.
+
+    Model participants may be deduplicated by canonical biological identity,
+    whereas the archived Step 12 paragraph renderer operated on raw KGML
+    occurrence nodes.  Optional ``legacy_*`` inputs keep those two surfaces
+    separate without discarding either representation.
+    """
 
     normalized = tuple(str(value).strip().casefold() for value in subtypes)
     legacy = legacy_relation_text(
+        relation_class=relation_class,
+        subtypes=normalized,
+        sources=legacy_sources if legacy_sources is not None else sources,
+        targets=legacy_targets if legacy_targets is not None else targets,
+        mediators=legacy_mediators if legacy_mediators is not None else mediators,
+    )
+    model_surface = legacy_relation_text(
         relation_class=relation_class,
         subtypes=normalized,
         sources=sources,
@@ -177,8 +193,12 @@ def audited_relation_text(
             compound=joined_names(mediators) if mediators else None,
         )
         return _clean_template_text(_capitalize(model_text)), legacy, TEXT_SOURCE_LEGACY_CORRECTED
-    if legacy is not None:
-        return _clean_template_text(legacy), legacy, TEXT_SOURCE_LEGACY_CORRECTED
+    if model_surface is not None:
+        return (
+            _clean_template_text(model_surface),
+            legacy,
+            TEXT_SOURCE_LEGACY_CORRECTED,
+        )
     return (
         _fallback_relation_text(
             relation_class=relation_class,
@@ -211,6 +231,8 @@ def audited_reaction_text(
     reversibility: str,
     sources: Sequence[Mapping[str, Any]],
     targets: Sequence[Mapping[str, Any]],
+    legacy_sources: Sequence[Mapping[str, Any]] | None = None,
+    legacy_targets: Sequence[Mapping[str, Any]] | None = None,
 ) -> tuple[str, str, str]:
     if reversibility not in {"reversible", "irreversible"}:
         raise ValueError(f"unsupported reaction reversibility={reversibility!r}")
@@ -220,8 +242,8 @@ def audited_reaction_text(
     adverb = "reversibly" if reversibility == "reversible" else "irreversibly"
     legacy = legacy_reaction_text(
         reversibility=reversibility,
-        sources=sources,
-        targets=targets,
+        sources=legacy_sources if legacy_sources is not None else sources,
+        targets=legacy_targets if legacy_targets is not None else targets,
     )
     return (
         _capitalize(f"{source} {verb} {adverb} converted to {target}."),
