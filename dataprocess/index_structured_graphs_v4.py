@@ -433,7 +433,10 @@ def scan_graph(task: ScanTask) -> ScanResult:
                     record_aliases,
                     record_fallbacks,
                     stable_rank(record.record_id, task.seed, "canonical_record"),
-                    sqlite3.Binary(zlib.compress(serialized, level=3)),
+                    # Return ordinary bytes across the process boundary.
+                    # sqlite3.Binary creates a memoryview, which cannot be
+                    # pickled by ProcessPoolExecutor on Linux.
+                    zlib.compress(serialized, level=3),
                     "",
                 )
             )

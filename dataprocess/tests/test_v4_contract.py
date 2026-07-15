@@ -316,6 +316,35 @@ class V4IndexerTests(unittest.TestCase):
             second = json.loads((output / "index_status.json").read_text())
             self.assertEqual(second["inventory"]["graph_files_already_indexed"], 1)
 
+    def test_parallel_index_worker_results_cross_process_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graph_dir = root / "graphs" / "aaa"
+            graph_dir.mkdir(parents=True)
+            (graph_dir / "aaa00010.json").write_text(
+                json.dumps(graph()), encoding="utf-8"
+            )
+            output = root / "index"
+            self.assertEqual(
+                index_main(
+                    [
+                        "--processed-graph-root",
+                        str(root / "graphs"),
+                        "--output-dir",
+                        str(output),
+                        "--workers",
+                        "2",
+                        "--batch-size",
+                        "1",
+                        "--progress-every",
+                        "0",
+                    ]
+                ),
+                0,
+            )
+            status = json.loads((output / "index_status.json").read_text())
+            self.assertEqual(status["summary"]["records"], 1)
+
 
 class V4MaterializationTests(unittest.TestCase):
     def test_split_token_filter_horizon_and_output_pipeline(self) -> None:
