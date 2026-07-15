@@ -216,13 +216,17 @@ def audit_processed_text(
             for event in layer.events:
                 if event.legacy_text is None:
                     continue
+                overrides = dict(event.legacy_text_overrides)
                 for producer_event_id in event.producer_renderable_event_ids:
+                    producer_legacy_text = overrides.get(
+                        producer_event_id, event.legacy_text
+                    )
                     previous = legacy_by_producer.get(producer_event_id)
-                    if previous is not None and previous != event.legacy_text:
+                    if previous is not None and previous != producer_legacy_text:
                         raise ValueError(
                             f"producer event {producer_event_id!r} has conflicting legacy text"
                         )
-                    legacy_by_producer[producer_event_id] = event.legacy_text
+                    legacy_by_producer[producer_event_id] = producer_legacy_text
     available = len(legacy_by_producer)
     if task.processed_path is None:
         return "not_requested", "", 0, available, 0

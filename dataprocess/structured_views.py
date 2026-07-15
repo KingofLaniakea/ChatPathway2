@@ -269,12 +269,31 @@ def _merge_semantic_events(events: Iterable[StructuredEvent]) -> StructuredEvent
                 seen_raw_subtypes.add(key)
                 raw_subtypes.append(dict(subtype))
 
-    legacy_texts = {
-        event.legacy_text for event in ordered if event.legacy_text is not None
-    }
-    if len(legacy_texts) > 1:
-        raise ValueError("semantic duplicates disagree on legacy event text")
-    legacy_text = next(iter(legacy_texts), None)
+    legacy_text_by_producer: dict[str, str] = {}
+    for event in ordered:
+        overrides = dict(event.legacy_text_overrides)
+        for producer_event_id in event.producer_renderable_event_ids:
+            producer_legacy_text = overrides.get(
+                producer_event_id, event.legacy_text
+            )
+            if producer_legacy_text is None:
+                raise ValueError("renderable producer event lacks legacy text")
+            prior = legacy_text_by_producer.get(producer_event_id)
+            if prior is not None and prior != producer_legacy_text:
+                raise ValueError(
+                    f"producer event {producer_event_id!r} has conflicting legacy text"
+                )
+            legacy_text_by_producer[producer_event_id] = producer_legacy_text
+    legacy_text = (
+        legacy_text_by_producer[producer_renderable_event_ids[0]]
+        if producer_renderable_event_ids
+        else None
+    )
+    legacy_text_overrides = tuple(
+        (producer_event_id, legacy_text_by_producer[producer_event_id])
+        for producer_event_id in producer_renderable_event_ids
+        if legacy_text_by_producer[producer_event_id] != legacy_text
+    )
     if legacy_text is not None:
         text_source = next(
             event.text_source for event in ordered if event.legacy_text is not None
@@ -307,6 +326,7 @@ def _merge_semantic_events(events: Iterable[StructuredEvent]) -> StructuredEvent
         mediator_node_ids=mediator_node_ids,
         mediator_entity_provenance=mediator_provenance,
         legacy_text=legacy_text,
+        legacy_text_overrides=legacy_text_overrides,
         text_source=text_source,
         producer_renderable_count=len(producer_renderable_event_ids),
         raw_reaction_names=tuple(reaction_names),

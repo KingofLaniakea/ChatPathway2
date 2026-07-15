@@ -564,6 +564,11 @@ class StructuredEvent:
     # could emit the exact legacy surface form.  This remains exact after
     # semantic duplicates are merged within one graph layer.
     producer_renderable_count: int
+    # ``legacy_text`` is the representative archived surface form.  A rare
+    # duplicate occurrence can have identical model semantics but a different
+    # historical display name; only those producer-specific differences are
+    # stored here, avoiding corpus-wide text duplication.
+    legacy_text_overrides: tuple[tuple[str, str], ...] = ()
     source_entity_provenance: tuple[dict[str, object], ...] = ()
     target_entity_provenance: tuple[dict[str, object], ...] = ()
     mediator_node_ids: tuple[int, ...] = ()
@@ -623,6 +628,7 @@ class StructuredEvent:
             "legacy_text": self.legacy_text,
             "text_source": self.text_source,
             "producer_renderable_count": self.producer_renderable_count,
+            "legacy_text_overrides": dict(self.legacy_text_overrides),
             "source_entity_provenance": [dict(value) for value in self.source_entity_provenance],
             "target_entity_provenance": [dict(value) for value in self.target_entity_provenance],
             "mediator_node_ids": list(self.mediator_node_ids),
@@ -1178,6 +1184,7 @@ _EVENT_RECORD_KEYS = {
     "legacy_text",
     "text_source",
     "producer_renderable_count",
+    "legacy_text_overrides",
     "source_entity_provenance",
     "target_entity_provenance",
     "mediator_node_ids",
@@ -1386,6 +1393,21 @@ def _record_event_from_object(value: object) -> StructuredEvent:
         raise ValueError(
             "producer_renderable_count disagrees with producer IDs or legacy text"
         )
+    raw_legacy_text_overrides = value.get("legacy_text_overrides")
+    if not isinstance(raw_legacy_text_overrides, dict) or not all(
+        isinstance(key, str)
+        and key in producer_renderable_event_ids
+        and isinstance(text, str)
+        and text.strip()
+        and text != legacy_text
+        for key, text in raw_legacy_text_overrides.items()
+    ):
+        raise ValueError("structured record legacy_text_overrides are invalid")
+    legacy_text_overrides = tuple(
+        (producer_event_id, str(raw_legacy_text_overrides[producer_event_id]))
+        for producer_event_id in producer_renderable_event_ids
+        if producer_event_id in raw_legacy_text_overrides
+    )
     topology_role = value.get("topology_role")
     if topology_role not in TOPOLOGY_ROLES:
         raise ValueError("structured record topology_role is invalid")
@@ -1469,6 +1491,7 @@ def _record_event_from_object(value: object) -> StructuredEvent:
         legacy_text=str(legacy_text) if legacy_text is not None else None,
         text_source=str(value["text_source"]),
         producer_renderable_count=producer_renderable_count,
+        legacy_text_overrides=legacy_text_overrides,
         source_entity_provenance=tuple(dict(item) for item in source_provenance),
         target_entity_provenance=tuple(dict(item) for item in target_provenance),
         mediator_node_ids=mediator_node_ids,

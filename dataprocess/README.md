@@ -9,13 +9,13 @@
 
 ## Canonical biological record
 
-- 非 group entry 是一个参与者；多个 resolved ID 分为一个 `canonical_id` 与 aliases，不拆成多个虚假参与者。
+- 非 group entry 是一个参与者；多个 resolved ID 分为一个 `canonical_id` 与 aliases，不拆成多个虚假参与者。同一规范实体由多个 occurrence node 重复出现时，模型侧按原事件顺序稳定去重并合并 aliases，record 侧仍保留每个 node provenance。
 - group entry 递归展开成员。
 - relation 保存 relation class 和全部 subtype；reaction 保存 substrate/product 与可逆性。
 - 只有有明确方向证据的关系和 reaction 方向参与 SCC/topology。无方向信息保留为 context，不制造时间边。
 - 任意坏端点、未解析实体或互相矛盾的结构字段会隔离整张 graph。
 - 先完成 SCC 和 layer 归属，再合并同层语义完全相同的 event；所有 producer event ID 和端点 provenance 仍保留。
-- `legacy_text` 复现固定的历史 Step12 模板，`text` 使用同一结构事实和已审计模板修正已知方向或语法问题。不会调用 LLM 生成 gold text。
+- `legacy_text` 复现固定的历史 Step12 模板；若合并后的不同 producer 使用了不同旧显示名，record 以 `legacy_text_overrides` 保留逐 producer 差异。`text` 使用去重后的结构事实和已审计模板修正已知方向或语法问题。不会调用 LLM 生成 gold text。
 
 身份顺序为 `graph_id -> view_id -> record_id -> base_sample_id -> profile sample_id`。JSONL 保存完整 record 与 provenance；CSV 一行是一个被选中的 prefix→continuation 问题。
 

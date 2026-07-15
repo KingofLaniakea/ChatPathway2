@@ -211,6 +211,52 @@ class V4EventContractTests(unittest.TestCase):
         rebuilt = record_from_object(records[0].record_object())
         self.assertEqual(rebuilt.record_object(), records[0].record_object())
 
+    def test_semantic_merge_retains_producer_specific_legacy_text(self) -> None:
+        payload = graph()
+        duplicate_b = node(5, "B")
+        duplicate_b["canonical_id"] = "ko:K00002"
+        duplicate_b["resolved_ids"] = ["ko:K00002"]
+        group_b = node(4, "B and B")
+        group_b.update(
+            {
+                "entity_type": "group",
+                "canonical_id": None,
+                "resolved_ids": [],
+                "raw_name": "group:2+5",
+                "aliases": [],
+                "component_entry_ids": [2, 5],
+            }
+        )
+        payload["nodes"].extend((group_b, duplicate_b))
+        payload["relations"] = [
+            relation(0, 1, 2),
+            relation(1, 1, 4),
+            relation(2, 2, 3),
+            relation(3, 4, 3),
+        ]
+        records = build_structured_records(
+            payload,
+            graph_id="graph:legacy-overrides",
+            source_graph_json="aaa/aaa00010.json",
+        )
+        self.assertEqual(len(records), 1)
+        merged = next(
+            event
+            for layer in records[0].layers
+            for event in layer.events
+            if event.producer_event_ids == ("relation:0", "relation:1")
+        )
+        self.assertEqual(
+            merged.legacy_text,
+            "A activates B.",
+        )
+        self.assertEqual(
+            dict(merged.legacy_text_overrides),
+            {"relation:1": "A activates B and B."},
+        )
+        rebuilt = record_from_object(records[0].record_object())
+        self.assertEqual(rebuilt.record_object(), records[0].record_object())
+
 
 class V4PolicyTests(unittest.TestCase):
     def test_horizon_solver_proves_exact_balance_when_feasible(self) -> None:
