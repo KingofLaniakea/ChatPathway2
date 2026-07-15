@@ -94,7 +94,14 @@ def dataset_namespace() -> str:
             DATASET_DIRECTORY_ENV, "data/pathway_v4_full"
         )
         manifest_path = Path(asset_path(dataset_directory)) / "dataset_manifest.json"
-        if manifest_path.is_file():
+        try:
+            manifest_available = (
+                os.environ.get("CHATPATHWAY_LAUNCH_DRY_RUN") != "1"
+                and manifest_path.is_file()
+            )
+        except OSError:
+            manifest_available = False
+        if manifest_available:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             build_id = manifest.get("dataset_build_id")
             if not isinstance(build_id, str) or not re.fullmatch(
