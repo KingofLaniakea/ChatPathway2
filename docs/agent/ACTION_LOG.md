@@ -110,6 +110,16 @@
 
 ## 3. 当前待办（按依赖顺序）
 
+### 2026-07-16 04:10 — v4 artifact 隔离与四卡 SFT 启动门
+
+- 作用域：本地 / CFFF / GitHub。
+- 动作：checkpoint/run 改为 dataset-build + seed 双重命名空间；增加只运行 shared SFT 的调度入口、48 小时硬门、derived release 透传、SDPA、长度分组 DDP、并行 tokenization 和四卡 validation。
+- 输入：`pathway_v4_full` immutable manifest/audit；commit `145735e`。
+- 输出：commit `f5a9aef`、dry-run 修复 `f4e9ccf`；CFFF 已 fast-forward。
+- 验证：method 51/51、experiments 32/32、dataprocess 79（5 historical skip）、9 matrix rows、18 wrappers、365 consistency records。
+- 结果：算法和启动链完成；数据索引进行中，225,000 / 1,368,605 graphs。
+- 后续：audit 通过后选择 48 小时内最大 release，只启动 seed 20260711 的四卡 SFT；GitHub 凭据需重新登录后推送。
+
 ### P0：数据落地与安全清理
 
 - [ ] 完成 Drive->CFFF 的 `processed_graph`/pipeline/cap64 资产传输。
