@@ -44,7 +44,7 @@ from dataprocess.structured_schema import compact_json
 DEFAULT_SHARDS = 64
 DEFAULT_WORKERS = 64
 DEFAULT_COMMIT_EVERY = 5000
-BUILD_SCHEMA_VERSION = "chatpathway_canonical_sharded_build_v4.0"
+BUILD_SCHEMA_VERSION = "chatpathway_canonical_sharded_build_v4.1"
 GRAPH_INSERT_SQL = "INSERT INTO graphs VALUES (" + ",".join("?" for _ in range(22)) + ")"
 RECORD_INSERT_SQL = (
     "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -86,20 +86,16 @@ def check_free_space(path: Path, minimum_free_gb: float) -> int:
 @dataclass(frozen=True)
 class Inventory:
     total_graphs: int
-    total_graph_bytes: int
     selected_graphs: int
-    selected_graph_bytes: int
-    selected_path_size_sha256: str
+    selected_path_manifest_sha256: str
     manifest_sha256: tuple[str, ...]
     manifest_graphs: tuple[int, ...]
 
     def object(self) -> dict[str, object]:
         return {
             "total_graphs": self.total_graphs,
-            "total_graph_bytes": self.total_graph_bytes,
             "selected_graphs": self.selected_graphs,
-            "selected_graph_bytes": self.selected_graph_bytes,
-            "selected_path_size_sha256": self.selected_path_size_sha256,
+            "selected_path_manifest_sha256": self.selected_path_manifest_sha256,
             "manifest_sha256": list(self.manifest_sha256),
             "manifest_graphs": list(self.manifest_graphs),
         }
@@ -108,10 +104,10 @@ class Inventory:
     def from_object(cls, value: dict[str, object]) -> "Inventory":
         return cls(
             total_graphs=int(value["total_graphs"]),
-            total_graph_bytes=int(value["total_graph_bytes"]),
             selected_graphs=int(value["selected_graphs"]),
-            selected_graph_bytes=int(value["selected_graph_bytes"]),
-            selected_path_size_sha256=str(value["selected_path_size_sha256"]),
+            selected_path_manifest_sha256=str(
+                value["selected_path_manifest_sha256"]
+            ),
             manifest_sha256=tuple(str(item) for item in value["manifest_sha256"]),
             manifest_graphs=tuple(int(item) for item in value["manifest_graphs"]),
         )
@@ -159,25 +155,34 @@ def build_inventory(
             path.unlink()
     handles = [path.open("w", encoding="utf-8") for path in temporary_paths]
     total_graphs = 0
-    total_graph_bytes = 0
     selected_graphs = 0
-    selected_graph_bytes = 0
-    selected_digest = hashlib.sha256()
+    selected_path_digest = hashlib.sha256()
     counts = [0] * shards
     try:
         for path in iter_graph_files(graph_root):
             relative, _, _ = source_identity(path, graph_root)
-            size = path.stat().st_size
             total_graphs += 1
-            total_graph_bytes += size
             if stable_bucket("sample", relative, sample_denominator) != sample_residue:
+                if total_graphs % 100000 == 0:
+                    print(
+                        f"stage=inventory graph_paths={total_graphs} "
+                        f"selected={selected_graphs}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 continue
             shard = stable_bucket("shard", relative, shards)
             handles[shard].write(relative + "\n")
             counts[shard] += 1
             selected_graphs += 1
-            selected_graph_bytes += size
-            selected_digest.update(f"{relative}\t{size}\n".encode("utf-8"))
+            selected_path_digest.update(f"{relative}\n".encode("utf-8"))
+            if total_graphs % 100000 == 0:
+                print(
+                    f"stage=inventory graph_paths={total_graphs} "
+                    f"selected={selected_graphs}",
+                    file=sys.stderr,
+                    flush=True,
+                )
     finally:
         for handle in handles:
             handle.close()
@@ -187,10 +192,8 @@ def build_inventory(
         temporary.replace(final)
     inventory = Inventory(
         total_graphs=total_graphs,
-        total_graph_bytes=total_graph_bytes,
         selected_graphs=selected_graphs,
-        selected_graph_bytes=selected_graph_bytes,
-        selected_path_size_sha256=selected_digest.hexdigest(),
+        selected_path_manifest_sha256=selected_path_digest.hexdigest(),
         manifest_sha256=tuple(file_sha256(path) for path in paths),
         manifest_graphs=tuple(counts),
     )
@@ -391,6 +394,22 @@ def attach_insert(
         connection.execute("DETACH DATABASE sharddb")
 
 
+def merged_path_size_inventory(
+    connection: sqlite3.Connection,
+) -> tuple[int, str]:
+    """Derive the strict source inventory after each source was actually read."""
+
+    graph_bytes = 0
+    digest = hashlib.sha256()
+    for relative, file_size in connection.execute(
+        "SELECT source_graph_json, file_size FROM graphs ORDER BY source_graph_json"
+    ):
+        size = int(file_size)
+        graph_bytes += size
+        digest.update(f"{relative}\t{size}\n".encode("utf-8"))
+    return graph_bytes, digest.hexdigest()
+
+
 def merge_shards(
     *,
     graph_root: Path,
@@ -451,14 +470,17 @@ def merge_shards(
                 table="records",
                 order_by="source_graph_json, record_id",
             )
+        merged_graph_bytes, merged_inventory_sha256 = merged_path_size_inventory(
+            connection
+        )
         connection.execute(
             "INSERT OR REPLACE INTO meta(key, value_json) VALUES('source_inventory', ?)",
             (
                 compact_json(
                     {
                         "graph_files": inventory.selected_graphs,
-                        "graph_bytes": inventory.selected_graph_bytes,
-                        "path_size_inventory_sha256": inventory.selected_path_size_sha256,
+                        "graph_bytes": merged_graph_bytes,
+                        "path_size_inventory_sha256": merged_inventory_sha256,
                     }
                 ),
             ),
@@ -482,6 +504,8 @@ def merge_shards(
             )
         if summary["records"] != summary["records_declared_by_graphs"]:
             raise ValueError("merged record count disagrees with graph declarations")
+        if summary["graph_bytes"] != merged_graph_bytes:
+            raise ValueError("merged graph bytes disagree with source inventory")
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         connection.close()
@@ -489,9 +513,8 @@ def merge_shards(
     inventory_counter: Counter[str] = Counter(
         {
             "graph_files": inventory.selected_graphs,
-            "graph_bytes": inventory.selected_graph_bytes,
+            "graph_bytes": merged_graph_bytes,
             "graph_files_total_before_sampling": inventory.total_graphs,
-            "graph_bytes_total_before_sampling": inventory.total_graph_bytes,
         }
     )
     write_status(
@@ -501,7 +524,7 @@ def merge_shards(
         database_path=database,
         contract=contract,
         inventory=inventory_counter,
-        inventory_sha256=inventory.selected_path_size_sha256,
+        inventory_sha256=merged_inventory_sha256,
         summary=summary,
         complete=True,
     )
