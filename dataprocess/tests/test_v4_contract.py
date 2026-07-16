@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import copy
 import json
+import sqlite3
 import tempfile
 import unittest
 import zlib
-import copy
 from pathlib import Path
 
-from dataprocess.index_structured_graphs_v4 import ScanTask, main as index_main, scan_graph
+from dataprocess.index_structured_graphs_v4 import (
+    ScanTask,
+    file_sha256,
+    main as index_main,
+    scan_graph,
+)
+from dataprocess.index_structured_graphs_v4_sharded import main as sharded_index_main
 from dataprocess.materialize_dataset_v4 import (
     apply_split_policy,
     assign_split_horizons,
@@ -301,6 +308,69 @@ class V4PolicyTests(unittest.TestCase):
 
 
 class V4IndexerTests(unittest.TestCase):
+    def test_sharded_index_merges_empty_and_nonempty_shards_reproducibly(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graph_root = root / "graphs"
+            for organism, family in (("aaa", "00010"), ("bbb", "00020")):
+                organism_dir = graph_root / organism
+                organism_dir.mkdir(parents=True)
+                payload = copy.deepcopy(graph())
+                payload["metadata"]["organism"] = organism
+                payload["metadata"]["pathway_id"] = f"path:{organism}{family}"
+                (organism_dir / f"{organism}{family}.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+            work = root / "scratch"
+            output = root / "index"
+            arguments = [
+                "--processed-graph-root",
+                str(graph_root),
+                "--work-dir",
+                str(work),
+                "--output-dir",
+                str(output),
+                "--shards",
+                "4",
+                "--workers",
+                "1",
+                "--progress-every",
+                "0",
+                "--minimum-free-gb",
+                "0.000001",
+            ]
+            self.assertEqual(sharded_index_main(arguments), 0)
+            database = output / "canonical_index_v4.sqlite3"
+            first_hash = file_sha256(database)
+            connection = sqlite3.connect(database)
+            try:
+                graph_count = connection.execute(
+                    "SELECT COUNT(*) FROM graphs"
+                ).fetchone()[0]
+                record_count = connection.execute(
+                    "SELECT COUNT(*) FROM records"
+                ).fetchone()[0]
+                self.assertEqual(graph_count, 2)
+                self.assertEqual(record_count, 2)
+                indexes = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index'"
+                    )
+                }
+                self.assertIn("records_family_rank", indexes)
+                self.assertIn("records_split_rank", indexes)
+                self.assertEqual(connection.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            finally:
+                connection.close()
+            self.assertEqual(sharded_index_main(arguments), 0)
+            self.assertEqual(file_sha256(database), first_hash)
+            self.assertEqual(
+                len(list((work / "shards").glob("canonical_shard_*.json"))), 4
+            )
+
     def test_index_worker_emits_valid_compressed_roundtrip_record(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "aaa00010.json"

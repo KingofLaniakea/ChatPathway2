@@ -487,7 +487,33 @@ def scan_batch(batch: ScanBatch) -> tuple[ScanResult, ...]:
     return tuple(scan_graph(task) for task in batch.tasks)
 
 
-def initialize_database(path: Path, contract: dict[str, object]) -> sqlite3.Connection:
+SECONDARY_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS records_family_rank ON records(family, rank);
+CREATE INDEX IF NOT EXISTS records_organism_rank ON records(organism, rank);
+CREATE INDEX IF NOT EXISTS records_graph_rank ON records(graph_id, rank);
+CREATE INDEX IF NOT EXISTS records_split_rank ON records(split, rank);
+"""
+
+
+def create_secondary_indexes(connection: sqlite3.Connection) -> None:
+    """Create query indexes after bulk ingestion has finished.
+
+    Maintaining these four B-trees while millions of rows are inserted is
+    needlessly expensive, especially on a network filesystem.  The legacy
+    single-database entrypoint keeps its old behaviour; the sharded builder
+    defers this call until its deterministic local merge.
+    """
+
+    connection.executescript(SECONDARY_INDEX_SQL)
+    connection.commit()
+
+
+def initialize_database(
+    path: Path,
+    contract: dict[str, object],
+    *,
+    create_query_indexes: bool = True,
+) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
@@ -543,12 +569,10 @@ def initialize_database(path: Path, contract: dict[str, object]) -> sqlite3.Conn
             split TEXT NOT NULL DEFAULT '',
             FOREIGN KEY(source_graph_json) REFERENCES graphs(source_graph_json)
         );
-        CREATE INDEX IF NOT EXISTS records_family_rank ON records(family, rank);
-        CREATE INDEX IF NOT EXISTS records_organism_rank ON records(organism, rank);
-        CREATE INDEX IF NOT EXISTS records_graph_rank ON records(graph_id, rank);
-        CREATE INDEX IF NOT EXISTS records_split_rank ON records(split, rank);
         """
     )
+    if create_query_indexes:
+        create_secondary_indexes(connection)
     existing = connection.execute(
         "SELECT value_json FROM meta WHERE key='generator_contract'"
     ).fetchone()
@@ -683,6 +707,9 @@ def consume_results(
     progress_every: int,
 ) -> int:
     processed = 0
+    indexed_graphs, canonical_records = connection.execute(
+        "SELECT COUNT(*), COALESCE(SUM(record_count),0) FROM graphs"
+    ).fetchone()
     graph_sql = "INSERT INTO graphs VALUES (" + ",".join("?" for _ in range(22)) + ")"
     record_sql = "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     for batch in results:
@@ -691,15 +718,14 @@ def consume_results(
             if result.record_rows:
                 connection.executemany(record_sql, result.record_rows)
             processed += 1
+            indexed_graphs += 1
+            canonical_records += int(result.graph_row[9])
             if processed % 250 == 0:
                 connection.commit()
             if progress_every and processed % progress_every == 0:
-                totals = connection.execute(
-                    "SELECT COUNT(*), COALESCE(SUM(record_count),0) FROM graphs"
-                ).fetchone()
                 print(
-                    f"new_graphs={processed} indexed_graphs={totals[0]} "
-                    f"canonical_records={totals[1]}",
+                    f"new_graphs={processed} indexed_graphs={indexed_graphs} "
+                    f"canonical_records={canonical_records}",
                     file=sys.stderr,
                     flush=True,
                 )
