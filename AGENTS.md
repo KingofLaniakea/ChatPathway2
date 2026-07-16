@@ -6,6 +6,15 @@
 - Keep models, datasets, checkpoints, runs, and generated artifacts outside Git.
 - Never commit credentials, `.env` files, model weights, generated CSV datasets, or checkpoints.
 
+## Experiment run layout (mandatory)
+
+- Follow `docs/RUN_DIRECTORY_STANDARD.md` for every formal server run.
+- On CFFF, use `runs/<version>/run_<N>/{reports,results,logs}` and keep a recoverable version-level code snapshot under `runs/<version>/code`.
+- Never overwrite an existing `run_<N>` or mix v3/v4 artifacts. A changed dataset split, checkpoint, evaluation commit, or material configuration requires a new run number.
+- `reports/` contains readable metrics, figures, cohorts, and small frozen evaluation inputs; `results/` contains or indexes checkpoints and other frozen assets; `logs/` contains training, inference, evaluation, and system logs.
+- Every formal run requires `RUN_MANIFEST.json`; large shared assets may be symlinked only when `results/ASSET_MANIFEST.json` records the resolved source, size, file count, and stable hash or upstream revision.
+- Preserve historical source paths instead of moving them. Consolidation must use copies, immutable snapshots, or manifest-backed links so existing commands remain reproducible.
+
 ## CFFF runtime
 
 - Repository: `/cpfs01/projects-HDD/cfff-3469a2cbe57f_HDD/lihaorui/ChatPathway2`.
