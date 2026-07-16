@@ -59,6 +59,29 @@ _FORBIDDEN_MODEL_METADATA_KEYS = frozenset(
     }
 )
 
+_FORBIDDEN_MODEL_METADATA_LABELS = (
+    "KEGG pathway ID:",
+    "Pathway title:",
+    "Pathway class:",
+    "Pathway block:",
+    "Phenotype:",
+)
+
+
+def forbidden_model_metadata_markers(question: str) -> tuple[str, ...]:
+    """Return explicit provenance fields rendered into a model prompt.
+
+    Biological entity names and event text may legitimately contain the same
+    surface phrase as a pathway title (for example, ``Two-component system``).
+    Therefore leakage checks must inspect field labels/JSON keys, not search for
+    arbitrary provenance *values* as substrings of biological content.
+    """
+
+    markers = _FORBIDDEN_MODEL_METADATA_LABELS + tuple(
+        f'"{key}"' for key in sorted(_FORBIDDEN_MODEL_METADATA_KEYS)
+    )
+    return tuple(marker for marker in markers if marker in question)
+
 
 def _forbidden_keys(value: object) -> set[str]:
     found: set[str] = set()
@@ -283,6 +306,7 @@ def render_pathway_question(
 
 __all__ = [
     "EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS",
+    "forbidden_model_metadata_markers",
     "NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS",
     "PATHWAY_CONTINUATION_SCHEMA_VERSION",
     "PROMPT_PROFILE_METADATA",

@@ -21,6 +21,7 @@ from typing import Any, Iterable, Iterator, Mapping, Sequence
 from dataprocess.prompt_profiles import (
     NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
     SPECIES_NEUTRAL_IDS_NO_ORGANISM,
+    forbidden_model_metadata_markers,
 )
 from dataprocess.release_contract import (
     MANIFEST_NAME,
@@ -1040,16 +1041,12 @@ def write_selected_split(
             # Explicit organism conditioning is allowed.  Pathway identity and
             # other answer-revealing provenance remain forbidden model input.
             question = str(row["question"])
-            if any(
-                marker in question
-                for marker in (
-                    "KEGG pathway ID:",
-                    "Pathway title:",
-                    "Pathway class:",
-                    "Pathway block:",
+            leaked_markers = forbidden_model_metadata_markers(question)
+            if leaked_markers:
+                raise ValueError(
+                    f"model-visible metadata leaked for {row['sample_id']}: "
+                    + ", ".join(leaked_markers)
                 )
-            ):
-                raise ValueError(f"model-visible metadata leaked for {row['sample_id']}")
             json.loads(str(row["answer"]))
             token_count = total_training_tokens(tokenizer, row)
             if token_count > max_length:

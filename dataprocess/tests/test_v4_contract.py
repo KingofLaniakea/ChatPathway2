@@ -545,6 +545,13 @@ class V4MaterializationTests(unittest.TestCase):
                     payload = copy.deepcopy(graph())
                     payload["metadata"]["organism"] = organism
                     payload["metadata"]["pathway_id"] = f"path:{organism}{family}"
+                    # A pathway-title surface phrase can also be legitimate
+                    # biological entity text.  It must not be mistaken for a
+                    # provenance header leak during release materialization.
+                    payload["metadata"]["title"] = "Two-component system"
+                    payload["nodes"][0]["display_name"] = (
+                        "Two-component system histidine sensor"
+                    )
                     (organism_dir / f"{organism}{family}.json").write_text(
                         json.dumps(payload), encoding="utf-8"
                     )

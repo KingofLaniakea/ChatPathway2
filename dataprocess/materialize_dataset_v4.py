@@ -23,6 +23,7 @@ from dataprocess.event_text import TEMPLATE_ASSET, template_provenance
 from dataprocess.prompt_profiles import (
     NO_EXPLICIT_ORGANISM_SOURCE_NATIVE_IDS,
     SPECIES_NEUTRAL_IDS_NO_ORGANISM,
+    forbidden_model_metadata_markers,
 )
 from dataprocess.release_contract_v4 import (
     ALL_SPLITS,
@@ -775,17 +776,12 @@ def write_materialized_outputs(
                 if answer.get("schema_version") != "pathway_continuation_v4":
                     raise ValueError("materialized answer is not v4")
                 question = str(row["question"])
-                forbidden = (
-                    record.pathway_id,
-                    record.pathway_title,
-                    record.view_id,
-                    "Pathway title:",
-                    "Pathway class:",
-                    "Pathway block:",
-                    "Phenotype:",
-                )
-                if any(value and value in question for value in forbidden):
-                    raise ValueError(f"model-visible metadata leaked for {row['sample_id']}")
+                leaked_markers = forbidden_model_metadata_markers(question)
+                if leaked_markers:
+                    raise ValueError(
+                        f"model-visible metadata leaked for {row['sample_id']}: "
+                        + ", ".join(leaked_markers)
+                    )
                 if row["sample_id"] in sample_ids or record.record_id in record_ids:
                     raise ValueError("duplicate materialized sample or record identity")
                 sample_ids.add(str(row["sample_id"]))
@@ -1387,9 +1383,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "answer_schema_version": "pathway_continuation_v4",
             "primary_prompt_profile": PRIMARY_PROMPT_PROFILE,
             "prompt_policy": (
-                "explicit known organism/source code in P0 question; no pathway ID/name/"
-                "category/title/block or phenotype in model-visible input or answer; "
-                "complete rich action JSON"
+                "explicit known organism/source code in P0 question; no pathway provenance "
+                "fields, headers, category, block, or phenotype in model-visible input or "
+                "answer; biological entity/event text is retained even when its surface "
+                "phrase coincides with a pathway title; complete rich action JSON"
             ),
             "entity_policy": (
                 "one non-group KGML entry is one canonical participant; additional resolved IDs "

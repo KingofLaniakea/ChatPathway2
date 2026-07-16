@@ -125,7 +125,7 @@ canonical record 同时保留 `layer_index`、每个独立 event 和 producer pr
 
 ### 4.1 模型看到什么
 
-主条件 P0 在实际应用已知的情况下显示 `Organism/source context (KEGG code)`，并显示 observed upstream structured layers。prompt 直接给出完整可解析的目标 JSON 格式，减少 SFT 仅为学习括号和 key 所消耗的容量。它不显示 pathway 名称、类别、ID、title、block 或 phenotype。
+主条件 P0 在实际应用已知的情况下显示 `Organism/source context (KEGG code)`，并显示 observed upstream structured layers。prompt 直接给出完整可解析的目标 JSON 格式，减少 SFT 仅为学习括号和 key 所消耗的容量。它不注入 pathway 名称、类别、ID、title、block、phenotype 等 provenance 字段或标题；但实体名称和事件句子保留原始生物内容，即使其中的自然语言短语恰好与某个 pathway title 相同，也不应被误删或误判为元数据泄漏。
 
 同时发布两个严格对照：
 
